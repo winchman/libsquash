@@ -1,4 +1,4 @@
-package main
+package libsquash
 
 import (
 	"encoding/json"

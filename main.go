@@ -9,6 +9,8 @@ import (
 	"strings"
 	"sync"
 	"syscall"
+
+	"github.com/jwilder/docker-squash/libsquash"
 )
 
 var (
@@ -20,7 +22,7 @@ var (
 func shutdown(tempdir string) {
 	defer wg.Done()
 	<-signals
-	debugf("Removing tempdir %s\n", tempdir)
+	libsquash.Debugf("Removing tempdir %s\n", tempdir)
 	err := os.RemoveAll(tempdir)
 	if err != nil {
 		fatal(err)
@@ -36,7 +38,7 @@ func main() {
 	flag.StringVar(&tag, "t", "", "Repository name and tag for new image")
 	flag.StringVar(&from, "from", "", "Squash from layer ID (default: first FROM layer)")
 	flag.BoolVar(&keepTemp, "keepTemp", false, "Keep temp dir when done. (Useful for debugging)")
-	flag.BoolVar(&verbose, "verbose", false, "Enable verbose logging")
+	flag.BoolVar(&libsquash.Verbose, "verbose", false, "Enable verbose logging")
 	flag.BoolVar(&version, "v", false, "Print version information and quit")
 
 	flag.Usage = func() {
@@ -73,7 +75,7 @@ func main() {
 		go shutdown(tempdir)
 	}
 
-	export, err := LoadExport(input, tempdir)
+	export, err := libsquash.LoadExport(input, tempdir)
 	if err != nil {
 		fatal(err)
 	}
@@ -133,10 +135,10 @@ func main() {
 		return
 	}
 
-	debugf("Inserted new layer %s after %s\n", newEntry.LayerConfig.Id[0:12],
+	libsquash.Debugf("Inserted new layer %s after %s\n", newEntry.LayerConfig.Id[0:12],
 		newEntry.LayerConfig.Parent[0:12])
 
-	if verbose {
+	if libsquash.Verbose {
 		e := export.Root()
 		for {
 			if e == nil {
@@ -148,9 +150,9 @@ func main() {
 			}
 
 			if e.LayerConfig.Id == newEntry.LayerConfig.Id {
-				debugf("  -> %s %s\n", e.LayerConfig.Id[0:12], cmd)
+				libsquash.Debugf("  -> %s %s\n", e.LayerConfig.Id[0:12], cmd)
 			} else {
-				debugf("  -  %s %s\n", e.LayerConfig.Id[0:12], cmd)
+				libsquash.Debugf("  -  %s %s\n", e.LayerConfig.Id[0:12], cmd)
 			}
 			e = export.ChildOf(e.LayerConfig.Id)
 		}
@@ -163,14 +165,14 @@ func main() {
 		return
 	}
 
-	debugf("Tarring up squashed layer %s\n", newEntry.LayerConfig.Id[:12])
+	libsquash.Debugf("Tarring up squashed layer %s\n", newEntry.LayerConfig.Id[:12])
 	// create a layer.tar from our squashed layer
 	err = newEntry.TarLayer()
 	if err != nil {
 		fatal(err)
 	}
 
-	debugf("Removing extracted layers\n")
+	libsquash.Debugf("Removing extracted layers\n")
 	// remove our expanded "layer" dirs
 	err = export.RemoveExtractedLayers()
 	if err != nil {
@@ -185,13 +187,13 @@ func main() {
 			repoPart = parts[0]
 			tagPart = parts[1]
 		}
-		tagInfo := TagInfo{}
+		tagInfo := libsquash.TagInfo{}
 		layer := export.LastChild()
 
 		tagInfo[tagPart] = layer.LayerConfig.Id
 		export.Repositories[repoPart] = &tagInfo
 
-		debugf("Tagging %s as %s:%s\n", layer.LayerConfig.Id[0:12], repoPart, tagPart)
+		libsquash.Debugf("Tagging %s as %s:%s\n", layer.LayerConfig.Id[0:12], repoPart, tagPart)
 		err := export.WriteRepositoriesJson()
 		if err != nil {
 			fatal(err)
@@ -205,9 +207,9 @@ func main() {
 		if err != nil {
 			fatal(err)
 		}
-		debugf("Tarring new image to %s\n", output)
+		libsquash.Debugf("Tarring new image to %s\n", output)
 	} else {
-		debugf("Tarring new image to STDOUT\n")
+		libsquash.Debugf("Tarring new image to STDOUT\n")
 	}
 	// bundle up the new image
 	err = export.TarLayers(ow)
@@ -215,7 +217,7 @@ func main() {
 		fatal(err)
 	}
 
-	debug("Done. New image created.")
+	libsquash.Debug("Done. New image created.")
 	// print our new history
 	export.PrintHistory()
 
