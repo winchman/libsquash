@@ -127,29 +127,14 @@ func (l *LayerConfig) ContainerConfig() *ContainerConfig {
 }
 
 // LoadExport loads a tarball export created by docker save.
-func LoadExport(image, location string) (*Export, error) {
-	if image == "" {
-		Debugf("Loading export from STDIN using %s for tempdir\n", location)
-	} else {
-		Debugf("Loading export from %s using %s for tempdir\n", image, location)
-	}
-
+func LoadExport(image io.Reader, tmpdir string) (*Export, error) {
 	export := &Export{
 		Entries:      map[string]*ExportedImage{},
 		Repositories: map[string]*TagInfo{},
-		Path:         location,
+		Path:         tmpdir,
 	}
 
-	ir := os.Stdin
-	if image != "" {
-		var err error
-		ir, err = os.Open(image)
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	err := export.Extract(ir)
+	err := export.Extract(image)
 	if err != nil {
 		return nil, err
 	}
@@ -529,7 +514,7 @@ func (e *Export) TarLayers(w io.Writer) error {
 	}
 	defer os.Chdir(cwd)
 
-	cmd := exec.Command("sudo", "/bin/bash", "-c", "tar cOf  - *")
+	cmd := exec.Command("tar", "cOf", "-", "*")
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return err

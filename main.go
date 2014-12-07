@@ -75,131 +75,22 @@ func main() {
 		go shutdown(tempdir)
 	}
 
-	export, err := libsquash.LoadExport(input, tempdir)
+	ir := os.Stdin
+	if input != "" {
+		var err error
+		ir, err = os.Open(input)
+		if err != nil {
+			fatal(err)
+		}
+	}
+
+	reader, err := libsquash.Squash(ir, tempdir)
 	if err != nil {
 		fatal(err)
 	}
 
 	// Export may have multiple branches with the same parent.
 	// We can't handle that currently so abort.
-	for _, v := range export.Repositories {
-		commits := map[string]string{}
-		for tag, commit := range *v {
-			commits[commit] = tag
-		}
-		if len(commits) > 1 {
-			fatal("This image is a full repository export w/ multiple images in it.  " +
-				"You need to generate the export from a specific image ID or tag.")
-		}
-
-	}
-
-	start := export.FirstSquash()
-	// Can't find a previously squashed layer, use first FROM
-	if start == nil {
-		start = export.FirstFrom()
-	}
-	// Can't find a FROM, default to root
-	if start == nil {
-		start = export.Root()
-	}
-
-	if from != "" {
-
-		if from == "root" {
-			start = export.Root()
-		} else {
-			start, err = export.GetById(from)
-			if err != nil {
-				fatal(err)
-			}
-		}
-	}
-
-	if start == nil {
-		fatalf("no layer matching %s\n", from)
-		return
-	}
-
-	// extract each "layer.tar" to "layer" dir
-	err = export.ExtractLayers()
-	if err != nil {
-		fatal(err)
-		return
-	}
-
-	// insert a new layer after our squash point
-	newEntry, err := export.InsertLayer(start.LayerConfig.Id)
-	if err != nil {
-		fatal(err)
-		return
-	}
-
-	libsquash.Debugf("Inserted new layer %s after %s\n", newEntry.LayerConfig.Id[0:12],
-		newEntry.LayerConfig.Parent[0:12])
-
-	if libsquash.Verbose {
-		e := export.Root()
-		for {
-			if e == nil {
-				break
-			}
-			cmd := strings.Join(e.LayerConfig.ContainerConfig().Cmd, " ")
-			if len(cmd) > 60 {
-				cmd = cmd[:60]
-			}
-
-			if e.LayerConfig.Id == newEntry.LayerConfig.Id {
-				libsquash.Debugf("  -> %s %s\n", e.LayerConfig.Id[0:12], cmd)
-			} else {
-				libsquash.Debugf("  -  %s %s\n", e.LayerConfig.Id[0:12], cmd)
-			}
-			e = export.ChildOf(e.LayerConfig.Id)
-		}
-	}
-
-	// squash all later layers into our new layer
-	err = export.SquashLayers(newEntry, newEntry)
-	if err != nil {
-		fatal(err)
-		return
-	}
-
-	libsquash.Debugf("Tarring up squashed layer %s\n", newEntry.LayerConfig.Id[:12])
-	// create a layer.tar from our squashed layer
-	err = newEntry.TarLayer()
-	if err != nil {
-		fatal(err)
-	}
-
-	libsquash.Debugf("Removing extracted layers\n")
-	// remove our expanded "layer" dirs
-	err = export.RemoveExtractedLayers()
-	if err != nil {
-		fatal(err)
-	}
-
-	if tag != "" {
-		tagPart := "latest"
-		repoPart := tag
-		parts := strings.Split(tag, ":")
-		if len(parts) > 1 {
-			repoPart = parts[0]
-			tagPart = parts[1]
-		}
-		tagInfo := libsquash.TagInfo{}
-		layer := export.LastChild()
-
-		tagInfo[tagPart] = layer.LayerConfig.Id
-		export.Repositories[repoPart] = &tagInfo
-
-		libsquash.Debugf("Tagging %s as %s:%s\n", layer.LayerConfig.Id[0:12], repoPart, tagPart)
-		err := export.WriteRepositoriesJson()
-		if err != nil {
-			fatal(err)
-		}
-	}
-
 	ow := os.Stdout
 	if output != "" {
 		var err error
@@ -211,15 +102,17 @@ func main() {
 	} else {
 		libsquash.Debugf("Tarring new image to STDOUT\n")
 	}
-	// bundle up the new image
-	err = export.TarLayers(ow)
+
+	byteArr, err := ioutil.ReadAll(reader)
 	if err != nil {
 		fatal(err)
 	}
 
+	if _, err = ow.Write(byteArr); err != nil {
+		fatal(err)
+	}
+
 	libsquash.Debug("Done. New image created.")
-	// print our new history
-	export.PrintHistory()
 
 	signals <- os.Interrupt
 	wg.Wait()
