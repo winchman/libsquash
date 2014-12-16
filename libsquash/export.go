@@ -147,25 +147,17 @@ func LoadExport(image io.Reader, tmpdir string) (*Export, error) {
 		return nil, err
 	}
 
-	if err := readJsonFile(filepath.Join(export.Path, "repositories"), &export.Repositories); err != nil {
-		return nil, err
-	}
-
-	Debugf("Loaded image w/ %s layers\n", strconv.FormatInt(int64(len(export.Entries)), 10))
-	for repo, tags := range export.Repositories {
-		Debugf("  -  %s (%s tags)\n", repo, strconv.FormatInt(int64(len(*tags)), 10))
-	}
-
 	return export, nil
 }
 
 func (e *Export) Populate(r io.Reader) error {
 	t := tar.NewReader(r)
+ReadFromTar:
 	for {
 		header, err := t.Next()
 		if err != nil {
 			if err == io.EOF {
-				return nil
+				break ReadFromTar
 			}
 			return err
 		}
@@ -181,27 +173,39 @@ func (e *Export) Populate(r io.Reader) error {
 		}
 
 		uuidPart := nameParts[0]
-		jsonPart := nameParts[len(nameParts)-1]
-		startsWithUUID := uuidRegex.MatchString(uuidPart)
-		endsWithJSON := jsonPart == "json"
+		fileName := nameParts[len(nameParts)-1]
 
-		// is a manifest file
-		if startsWithUUID && endsWithJSON {
-			bytes, err := ioutil.ReadAll(t)
-			if err != nil {
-				return err
-			}
-			e.Entries[uuidPart] = &ExportedImage{
-				Path:         filepath.Join(e.Path, uuidPart),
-				JsonPath:     filepath.Join(e.Path, uuidPart, "json"),
-				VersionPath:  filepath.Join(e.Path, uuidPart, "VERSION"),
-				LayerTarPath: filepath.Join(e.Path, uuidPart, "layer.tar"),
-				LayerDirPath: filepath.Join(e.Path, uuidPart, "layer"),
-			}
-			if err = json.Unmarshal(bytes, &e.Entries[uuidPart].LayerConfig); err != nil {
-				return err
+		if len(nameParts) == 2 && uuidRegex.MatchString(uuidPart) {
+			if fileName == "json" {
+				bytes, err := ioutil.ReadAll(t)
+				if err != nil {
+					return err
+				}
+				e.Entries[uuidPart] = &ExportedImage{
+					Path:         filepath.Join(e.Path, uuidPart),
+					JsonPath:     filepath.Join(e.Path, uuidPart, "json"),
+					VersionPath:  filepath.Join(e.Path, uuidPart, "VERSION"),
+					LayerTarPath: filepath.Join(e.Path, uuidPart, "layer.tar"),
+					LayerDirPath: filepath.Join(e.Path, uuidPart, "layer"),
+				}
+				if err = json.Unmarshal(bytes, &e.Entries[uuidPart].LayerConfig); err != nil {
+					return err
+				}
+			} else if fileName == "repositories" {
+				bytes, err := ioutil.ReadAll(t)
+				if err != nil {
+					return err
+				}
+				if err = json.Unmarshal(bytes, &e.Repositories); err != nil {
+					return err
+				}
 			}
 		}
+	}
+
+	Debugf("Loaded image w/ %s layers\n", strconv.FormatInt(int64(len(e.Entries)), 10))
+	for repo, tags := range e.Repositories {
+		Debugf("  -  %s (%s tags)\n", repo, strconv.FormatInt(int64(len(*tags)), 10))
 	}
 	return nil
 }
@@ -685,46 +689,3 @@ func (e *Export) WriteRepositoriesJson() error {
 
 	return err
 }
-
-/*
-
-This is not working.  whiteouts doen't seem to be removed when the layers
-are mounted via aufs.  The idea was to create squashed layer using an aufs
-mount and then tar up the results.
-
-func (e *Export) Mount(location, from string) error {
-    current := e.Entries[from]
-    if current == nil {
-        return errors.New(fmt.Sprintf("%s does not exists", from))
-    }
-
-    order := []*ExportedImage{}
-    for {
-        order = append(order, current)
-        current = e.ChildOf(current.LayerConfig.Id)
-        if current == nil {
-            break
-        }
-    }
-
-    mounts := []string{}
-    for _, entry := range order {
-        mounts = append(mounts, entry.LayerDirPath+"=ro+wh")
-    }
-
-    newLoc := filepath.Join(location, "layer")
-    err := os.MkdirAll(newLoc, 0755)
-    if err != nil {
-        return err
-    }
-
-    println(fmt.Sprintf("mount -t aufs -o br=%s=rw+wh:%s none %s",
-        newLoc,
-        strings.Join(mounts, ":"), newLoc))
-    return nil
-}
-
-func (e *Export) Unmount(location string) error {
-    return nil
-}
-*/
