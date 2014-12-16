@@ -1,0 +1,15 @@
+#!/bin/bash
+
+cmd="$@"
+
+if [[ -z "$cmd" ]] ; then
+  cmd="extract"
+fi
+
+exec docker run -ti --rm --net host --name foo -p 5000:5000 \
+  -e DOCKER_HOST="$DOCKER_HOST" \
+  -e DOCKER_CERT_PATH=/root/.boot2docker/certs/boot2docker-vm \
+  -e DOCKER_TLS_VERIFY=1 \
+  -e IMAGE_ID="$IMAGE_ID" \
+  -v ~/.bash_history:/root/.bash_history \
+  -v $HOME/.boot2docker:/root/.boot2docker rafecolton/docker-squash $cmd

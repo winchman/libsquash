@@ -1,6 +1,9 @@
 ---
 version: 1
 
+docker:
+  tag_opts: ["--force"]
+
 container_globals:
   skip_push: true
 
@@ -9,6 +12,8 @@ container:
     Dockerfile: "Dockerfile"
     registry: "rafecolton"
     project: "docker-squash"
-    tags: ["latest"]
+    tags:
+    - "latest"
+    - "{{ date `2006-01-02` }}"
 
 # vim:ft=yaml
