@@ -12,12 +12,15 @@ import (
 	"os/exec"
 	"path"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/docker/docker/pkg/units"
 )
+
+var uuidRegex = regexp.MustCompile("^[a-f0-9]{64}$")
 
 type TagInfo map[string]string
 
@@ -134,40 +137,17 @@ func LoadExport(image io.Reader, tmpdir string) (*Export, error) {
 		Path:         tmpdir,
 	}
 
-	err := export.Extract(image)
-	if err != nil {
+	// populate the data structure without writing any files to disk
+	if err := export.Populate(image); err != nil {
 		return nil, err
 	}
 
-	dirs, err := ioutil.ReadDir(export.Path)
-	if err != nil {
+	// write the files to disk - TODO: remove this eventually
+	if err := export.Extract(image); err != nil {
 		return nil, err
 	}
 
-	for _, dir := range dirs {
-
-		if !dir.IsDir() {
-			continue
-		}
-
-		entry := &ExportedImage{
-			Path:         filepath.Join(export.Path, dir.Name()),
-			JsonPath:     filepath.Join(export.Path, dir.Name(), "json"),
-			VersionPath:  filepath.Join(export.Path, dir.Name(), "VERSION"),
-			LayerTarPath: filepath.Join(export.Path, dir.Name(), "layer.tar"),
-			LayerDirPath: filepath.Join(export.Path, dir.Name(), "layer"),
-		}
-
-		err := readJsonFile(entry.JsonPath, &entry.LayerConfig)
-		if err != nil {
-			return nil, err
-		}
-
-		export.Entries[entry.LayerConfig.Id] = entry
-	}
-
-	err = readJsonFile(filepath.Join(export.Path, "repositories"), &export.Repositories)
-	if err != nil {
+	if err := readJsonFile(filepath.Join(export.Path, "repositories"), &export.Repositories); err != nil {
 		return nil, err
 	}
 
@@ -175,13 +155,59 @@ func LoadExport(image io.Reader, tmpdir string) (*Export, error) {
 	for repo, tags := range export.Repositories {
 		Debugf("  -  %s (%s tags)\n", repo, strconv.FormatInt(int64(len(*tags)), 10))
 	}
-	return export, err
+
+	return export, nil
+}
+
+func (e *Export) Populate(r io.Reader) error {
+	t := tar.NewReader(r)
+	for {
+		header, err := t.Next()
+		if err != nil {
+			if err == io.EOF {
+				return nil
+			}
+			return err
+		}
+
+		if header.Name == "." || header.Name == ".." || header.Name == "./" {
+			continue
+		}
+
+		// if is json file
+		nameParts := strings.Split(header.Name, string(os.PathSeparator))
+		if len(nameParts) != 2 {
+			continue
+		}
+
+		uuidPart := nameParts[0]
+		jsonPart := nameParts[len(nameParts)-1]
+		startsWithUUID := uuidRegex.MatchString(uuidPart)
+		endsWithJSON := jsonPart == "json"
+
+		// is a manifest file
+		if startsWithUUID && endsWithJSON {
+			bytes, err := ioutil.ReadAll(t)
+			if err != nil {
+				return err
+			}
+			e.Entries[uuidPart] = &ExportedImage{
+				Path:         filepath.Join(e.Path, uuidPart),
+				JsonPath:     filepath.Join(e.Path, uuidPart, "json"),
+				VersionPath:  filepath.Join(e.Path, uuidPart, "VERSION"),
+				LayerTarPath: filepath.Join(e.Path, uuidPart, "layer.tar"),
+				LayerDirPath: filepath.Join(e.Path, uuidPart, "layer"),
+			}
+			if err = json.Unmarshal(bytes, &e.Entries[uuidPart].LayerConfig); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 func (e *Export) Extract(r io.Reader) error {
-
-	err := os.MkdirAll(e.Path, 0755)
-	if err != nil {
+	if err := os.MkdirAll(e.Path, 0755); err != nil {
 		return err
 	}
 
@@ -517,6 +543,7 @@ func (e *Export) TarLayers(w io.Writer) error {
 	cmd := exec.Command("tar", "cOf", "-", "*")
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
+		println("GOT HERE 1")
 		return err
 	}
 
@@ -610,7 +637,9 @@ func (e *Export) rewriteChildren(entry *ExportedImage) error {
 
 func (e *Export) deleteWhiteouts(location string) error {
 	return filepath.Walk(location, func(p string, info os.FileInfo, err error) error {
+		//fmt.Printf("processing: p => %s, info => %#v, err => %#v\n", p, info, err)
 		if err != nil && !os.IsNotExist(err) {
+			println("GOT HERE: " + err.Error())
 			return err
 		}
 

@@ -2,12 +2,12 @@ package libsquash
 
 import (
 	"encoding/json"
-	"io/ioutil"
+	//"io/ioutil"
 	"os"
-	//"os/exec"
+	"os/exec"
 	"time"
 
-	"github.com/docker/docker/pkg/archive"
+	//"github.com/docker/docker/pkg/archive"
 )
 
 type ExportedImage struct {
@@ -73,36 +73,37 @@ func (e *ExportedImage) CreateDirs() error {
 
 func (e *ExportedImage) TarLayer() error {
 
-	cwd, err := os.Getwd()
-	if err != nil {
-		return err
-	}
-
-	err = os.Chdir(e.LayerDirPath)
-	if err != nil {
-		return err
-	}
-	defer os.Chdir(cwd)
-
-	readCloser, err := archive.Tar(e.LayerDirPath, archive.Uncompressed)
-	if err != nil {
-		return err
-	}
-
-	archiveBytes, err := ioutil.ReadAll(readCloser)
-	if err != nil {
-		return err
-	}
-	return ioutil.WriteFile(e.LayerDirPath+"../layer.tar", archiveBytes, 0644)
-
-	//cmd := exec.Command("tar", "cvf", "../layer.tar", "*")
-	////cmd.Dir = e.LayerDirPath
-	//out, err := cmd.CombinedOutput()
+	//cwd, err := os.Getwd()
 	//if err != nil {
-	//println(string(out))
+		//return err
+	//}
+
+	//err = os.Chdir(e.LayerDirPath)
+	//if err != nil {
+		//return err
+	//}
+	//defer os.Chdir(cwd)
+
+	//readCloser, err := archive.Tar(e.LayerDirPath, archive.Uncompressed)
+	//if err != nil {
 	//return err
 	//}
-	//return nil
+
+	//archiveBytes, err := ioutil.ReadAll(readCloser)
+	//if err != nil {
+	//return err
+	//}
+	//return ioutil.WriteFile(e.LayerDirPath+"../layer.tar", archiveBytes, 0644)
+
+	cmd := exec.Command("tar", "cvf", "../layer.tar", ".")
+	cmd.Dir = e.LayerDirPath
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		println("GOT HERE 2")
+		println(string(out))
+		return err
+	}
+	return nil
 }
 
 func (e *ExportedImage) RemoveLayerDir() error {

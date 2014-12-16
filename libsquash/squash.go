@@ -2,7 +2,9 @@ package libsquash
 
 import (
 	"errors"
+	"fmt"
 	"io"
+	"os"
 	"strings"
 )
 
@@ -11,6 +13,16 @@ func Squash(reader io.Reader, tempdir string) (io.Reader, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	fmt.Printf("path: %s\n", export.Path)
+	fmt.Println("printing Entries")
+	for k, v := range export.Entries {
+		fmt.Printf("key: %#v\n", k)
+		fmt.Printf("value: %#v\n", v)
+	}
+
+	//fmt.Printf("export: %#v\n", export)
+	os.Exit(1)
 
 	// Export may have multiple branches with the same parent.
 	// We can't handle that currently so abort.
