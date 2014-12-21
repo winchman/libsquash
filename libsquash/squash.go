@@ -1,28 +1,82 @@
 package libsquash
 
 import (
+	"archive/tar"
+	"encoding/json"
 	"errors"
-	"fmt"
+	"io/ioutil"
+	//"path/filepath"
+	//"fmt"
 	"io"
 	"os"
 	"strings"
 )
 
-func Squash(reader io.Reader, tempdir string) (io.Reader, error) {
-	export, err := LoadExport(reader, tempdir)
-	if err != nil {
-		return nil, err
-	}
+var (
+	errorMultipleBranchesSameParent = errors.New("this image is a full repository export w/ multiple images in it. " +
+		"Please generate the export from a specific image ID or tag.",
+	)
+	errorNoFROM = errors.New("no layer matching FROM")
+)
 
-	fmt.Printf("path: %s\n", export.Path)
-	fmt.Println("printing Entries")
-	for k, v := range export.Entries {
-		fmt.Printf("key: %#v\n", k)
-		fmt.Printf("value: %#v\n", v)
-	}
+func Squash(inStream io.Reader, tempdir string) (io.Reader, error) {
+	var tarReader = tar.NewReader(inStream)
 
-	//fmt.Printf("export: %#v\n", export)
-	os.Exit(1)
+	var export = NewExport()
+
+	for {
+		header, err := tarReader.Next()
+		if err != nil {
+			if err == io.EOF {
+				break
+			}
+			return nil, err
+		}
+
+		if header.Name == "." || header.Name == ".." || header.Name == "./" {
+			continue
+		}
+
+		// if is json file
+		nameParts := strings.Split(header.Name, string(os.PathSeparator))
+		if len(nameParts) == 1 && nameParts[0] == "repositories" {
+			bytes, err := ioutil.ReadAll(tarReader)
+			if err != nil {
+				return nil, err
+			}
+			if err = json.Unmarshal(bytes, &export.Repositories); err != nil {
+				return nil, err
+			}
+		}
+
+		if len(nameParts) != 2 {
+			continue
+		}
+
+		uuidPart := nameParts[0]
+		fileName := nameParts[1]
+
+		if export.Entries[uuidPart] == nil {
+			export.Entries[uuidPart] = &ExportedImage{}
+		}
+
+		switch fileName {
+		case "json":
+			bytes, err := ioutil.ReadAll(tarReader)
+			if err != nil {
+				return nil, err
+			}
+			if err = json.Unmarshal(bytes, &export.Entries[uuidPart].LayerConfig); err != nil {
+				return nil, err
+			}
+		case "layer.tar":
+			println("loading " + header.Name)
+			_, err := export.Entries[uuidPart].LayerTarBuffer.ReadFrom(tarReader)
+			if err != nil {
+				return nil, err
+			}
+		}
+	}
 
 	// Export may have multiple branches with the same parent.
 	// We can't handle that currently so abort.
@@ -32,13 +86,8 @@ func Squash(reader io.Reader, tempdir string) (io.Reader, error) {
 			commits[commit] = tag
 		}
 		if len(commits) > 1 {
-			return nil, errors.New(
-				"This image is a full repository export w/ multiple images in it.  " +
-					"You need to generate the export from a specific image ID or tag.",
-			)
-
+			return nil, errorMultipleBranchesSameParent
 		}
-
 	}
 
 	start := export.FirstSquash()
@@ -52,13 +101,7 @@ func Squash(reader io.Reader, tempdir string) (io.Reader, error) {
 	}
 
 	if start == nil {
-		return nil, errors.New("no layer matching FROM")
-	}
-
-	// extract each "layer.tar" to "layer" dir
-	err = export.ExtractLayers()
-	if err != nil {
-		return nil, err
+		return nil, errorNoFROM
 	}
 
 	// insert a new layer after our squash point
@@ -67,56 +110,37 @@ func Squash(reader io.Reader, tempdir string) (io.Reader, error) {
 		return nil, err
 	}
 
-	Debugf("Inserted new layer %s after %s\n", newEntry.LayerConfig.Id[0:12],
-		newEntry.LayerConfig.Parent[0:12])
+	Debugf("Inserted new layer %s after %s\n", newEntry.LayerConfig.Id[0:12], newEntry.LayerConfig.Parent[0:12])
 
 	if Verbose {
-		e := export.Root()
-		for {
-			if e == nil {
-				break
-			}
-			cmd := strings.Join(e.LayerConfig.ContainerConfig().Cmd, " ")
-			if len(cmd) > 60 {
-				cmd = cmd[:60]
-			}
-
-			if e.LayerConfig.Id == newEntry.LayerConfig.Id {
-				Debugf("  -> %s %s\n", e.LayerConfig.Id[0:12], cmd)
-			} else {
-				Debugf("  -  %s %s\n", e.LayerConfig.Id[0:12], cmd)
-			}
-			e = export.ChildOf(e.LayerConfig.Id)
-		}
+		printVerbose(export, newEntry.LayerConfig.Id)
 	}
 
 	// squash all later layers into our new layer
-	if err = export.SquashLayers(newEntry, newEntry); err != nil {
+	reader, err := export.SquashLayers(newEntry, start)
+	if err != nil {
 		return nil, err
 	}
-
-	Debugf("Tarring up squashed layer %s\n", newEntry.LayerConfig.Id[:12])
-	// create a layer.tar from our squashed layer
-	if err = newEntry.TarLayer(); err != nil {
-		return nil, err
-	}
-
-	Debugf("Removing extracted layers\n")
-	// remove our expanded "layer" dirs
-	if err = export.RemoveExtractedLayers(); err != nil {
-		return nil, err
-	}
-
-	reader, writer := io.Pipe()
-
-	// bundle up the new image
-	if err = export.TarLayers(writer); err != nil {
-		return nil, err
-	}
-
-	Debug("Done. New image created.")
-	// print our new history
-	export.PrintHistory()
 
 	return reader, nil
+}
+
+func printVerbose(export *Export, newEntryID string) {
+	e := export.Root()
+	for {
+		if e == nil {
+			break
+		}
+		cmd := strings.Join(e.LayerConfig.ContainerConfig().Cmd, " ")
+		if len(cmd) > 60 {
+			cmd = cmd[:60]
+		}
+
+		if e.LayerConfig.Id == newEntryID {
+			Debugf("  -> %s %s\n", e.LayerConfig.Id[0:12], cmd)
+		} else {
+			Debugf("  -  %s %s\n", e.LayerConfig.Id[0:12], cmd)
+		}
+		e = export.ChildOf(e.LayerConfig.Id)
+	}
 }
