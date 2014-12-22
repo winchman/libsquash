@@ -1,4 +1,4 @@
-package main
+package libsquash
 
 import (
 	"bytes"
@@ -8,16 +8,23 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
+	//"os/exec"
 	"strconv"
 	"time"
+
+	//"github.com/docker/docker/pkg/archive"
 )
 
-func extractTar(src, dest string) ([]byte, error) {
-	cmd := exec.Command("tar", "--same-owner", "--xattrs", "--overwrite",
-		"--preserve-permissions", "-xf", src, "-C", dest)
-	return cmd.CombinedOutput()
-}
+//func extractTar(src, dest string) ([]byte, error) {
+//cmd := exec.Command("tar", "--same-owner", "-xpf", src, "-C", dest, "--exclude=.wh.*")
+////srcFile, err := os.Open(src)
+////if err != nil {
+////return nil, err
+////}
+////return nil, archive.Untar(srcFile, dest, &archive.TarOptions{NoLchown: false})
+////cmd := exec.Command("tar", "-xpf", src, "-C", dest)
+//return cmd.CombinedOutput()
+//}
 
 func humanDuration(d time.Duration) string {
 	if seconds := int(d.Seconds()); seconds < 1 {

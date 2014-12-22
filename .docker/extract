@@ -1,0 +1,5 @@
+#!/bin/bash
+
+set -e
+
+exec bash -c "time docker save -o image.tar $IMAGE_ID && time docker-squash -i image.tar -o squashed.tar -verbose && exec bash -l"
