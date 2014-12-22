@@ -10,7 +10,7 @@ import (
 	"sync"
 	"syscall"
 
-	"github.com/jwilder/docker-squash/libsquash"
+	"github.com/rafecolton/libsquash"
 )
 
 var (

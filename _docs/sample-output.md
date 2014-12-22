@@ -55,7 +55,7 @@ Squashing from 27935276f797 into 27935276f797
   -  Removing 49b5a7a88d53. Squashed. (/bin/bash)
 Tarring up squashed layer 27935276f797
 Removing extracted layers
-Tagging 40b8c7c33bba as jwilder/whoami:squash
+Tagging 40b8c7c33bba as rafecolton/whoami:squash
 Tarring new image to STDOUT
 Done. New image created.
   -  40b8c7c33bba Less than a second /bin/sh -c #(nop) CMD [/app/http] 3.072 kB

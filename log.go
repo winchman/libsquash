@@ -1,21 +1,20 @@
-package main
+package libsquash
 
 import (
 	"fmt"
 	"os"
 )
 
-func fatalf(format string, args ...interface{}) {
-	fmt.Fprintf(os.Stderr, fmt.Sprintf("ERROR: %s", format), args...)
-	signals <- os.Interrupt
-	wg.Wait()
-	os.Exit(1)
+var Verbose bool
+
+func Debugf(format string, args ...interface{}) {
+	if Verbose {
+		fmt.Fprintf(os.Stderr, fmt.Sprintf("%s", format), args...)
+	}
 }
 
-func fatal(args ...interface{}) {
-	fmt.Fprint(os.Stderr, "ERROR: ")
-	fmt.Fprintln(os.Stderr, args...)
-	signals <- os.Interrupt
-	wg.Wait()
-	os.Exit(1)
+func Debug(args ...interface{}) {
+	if Verbose {
+		fmt.Fprintln(os.Stderr, args...)
+	}
 }

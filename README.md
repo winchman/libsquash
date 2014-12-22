@@ -1,5 +1,5 @@
-docker-squash
-=============
+libsquash
+=========
 
 This is based on
 [https://github.com/jwilder/docker-squash](https://github.com/jwilder/docker-squash),
