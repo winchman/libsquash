@@ -1,2 +1,0 @@
-- when rewriting layer json, rewrite checksum
-  * https://github.com/docker/docker/blob/eb3bbde6d18bb35774cd3ab2c6eba0016f679d2b/image/image.go#L104-L106
