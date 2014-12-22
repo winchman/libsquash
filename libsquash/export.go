@@ -3,6 +3,7 @@ package libsquash
 import (
 	"archive/tar"
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -100,6 +101,11 @@ type LayerConfig struct {
 	Config            *Config          `json:"config,omitempty"`
 	DockerVersion     string           `json:"docker_version"`
 	Architecture      string           `json:"architecture"`
+}
+
+type tarFile struct {
+	Contents *bytes.Buffer
+	Header   *tar.Header
 }
 
 func (l *LayerConfig) ContainerConfig() *ContainerConfig {
@@ -233,9 +239,6 @@ func (e *Export) ReplaceLayer(oldId string) (*ExportedImage, error) {
 	child := e.ChildOf(oldId)
 
 	cmd := strings.Join(orig.LayerConfig.ContainerConfig().Cmd, " ")
-	if len(cmd) > 50 {
-		cmd = cmd[:47] + "..."
-	}
 
 	Debugf("  -  Replacing %s w/ new layer %s (%s)\n", oldId[:12], id[:12], cmd)
 	if child != nil {
@@ -254,20 +257,15 @@ func (e *Export) ReplaceLayer(oldId string) (*ExportedImage, error) {
 
 	delete(e.Entries, oldId)
 
-	return entry, err
+	return entry, nil
 }
 
-func (e *Export) SquashLayers(to, from *ExportedImage) (io.Reader, error) {
-	Debugf("Squashing from %s into %s\n", from.LayerConfig.Id[:12], to.LayerConfig.Id[:12])
+// to => newEntry (squash layer), from => "start"
+func (e *Export) SquashLayers(into, from *ExportedImage) (io.Reader, error) {
+	Debugf("Squashing from %s into %s\n", from.LayerConfig.Id[:12], into.LayerConfig.Id[:12])
 
-	Debug("  -  Rewriting child history")
-	if err := e.rewriteChildren(from); err != nil {
-		return nil, err
-	}
-
-	var out = new(bytes.Buffer)
-	var tw = tar.NewWriter(out)
-	defer tw.Close()
+	var files = map[string]*tarFile{}
+	var whiteouts = []string{}
 
 	var current = from
 	var order = []*ExportedImage{}
@@ -278,8 +276,6 @@ func (e *Export) SquashLayers(to, from *ExportedImage) (io.Reader, error) {
 			break
 		}
 	}
-
-	var files = map[string]*bytes.Buffer{}
 
 	for _, current := range order {
 		subtar := tar.NewReader(&current.LayerTarBuffer)
@@ -296,43 +292,126 @@ func (e *Export) SquashLayers(to, from *ExportedImage) (io.Reader, error) {
 			fileName := nameParts[len(nameParts)-1]
 			// skip whiteout files
 			if strings.HasPrefix(fileName, ".wh.") {
+				whiteouts = append(whiteouts, header.Name)
 				continue
 			}
 
-			if files[fileName] == nil {
-				files[fileName] = new(bytes.Buffer)
+			if files[header.Name] == nil {
+				files[header.Name] = &tarFile{
+					Contents: new(bytes.Buffer),
+					Header:   header,
+				}
 			}
 
-			files[fileName].Reset()
-			if _, err = files[fileName].ReadFrom(subtar); err != nil {
+			files[header.Name].Contents.Reset()
+			if _, err = files[header.Name].Contents.ReadFrom(subtar); err != nil {
 				return nil, err
 			}
 		}
-		/*
-			TODO:
-			- create squashed layer tar
-			- add buffer to export data structure
-		*/
 	}
 
-	// write files to layer.tar of the squash layer
+	files = deleteWhiteouts(files, whiteouts)
 
-	for _, _ = range order {
-		//for _, current := range order {
-		/*
-			TODO: rebuild final tar
-				by calling:
-				- tw.WriteHeader() // to write the header
-				- tw.Write([]byte(file.Body)) // write file contents
-				- files to create:
-					* dir
-					* dir/VERSION
-					* dir/json
-					* dir/layer.tar
-		*/
+	// tar writer for layer.tar for new squash layer
+	var squashLayerTarWriter = tar.NewWriter(&into.LayerTarBuffer)
+
+	// create layer.tar for squash layer
+	for _, file := range files {
+		squashLayerTarWriter.WriteHeader(file.Header)
+		squashLayerTarWriter.Write(file.Contents.Bytes())
+	}
+	if err := squashLayerTarWriter.Close(); err != nil {
+		return nil, err
+	}
+
+	var out = new(bytes.Buffer)
+	var tw = tar.NewWriter(out)
+	var latestDirHeader, latestVersionHeader, latestJsonHeader, latestTarHeader *tar.Header
+
+	Debug("  -  Rewriting child history")
+	if err := e.rewriteChildren(into); err != nil {
+		return nil, err
+	}
+
+	for _, current := range order {
+		var dir = current.DirHeader
+		if latestDirHeader == nil {
+			latestDirHeader = dir
+		}
+		if dir == nil {
+			dir = latestDirHeader
+		}
+		dir.Name = current.LayerConfig.Id + "/"
+		if err := tw.WriteHeader(dir); err != nil {
+			return nil, err
+		}
+
+		var version = current.VersionHeader
+		if latestVersionHeader == nil {
+			latestVersionHeader = version
+		}
+		if version == nil {
+			version = latestVersionHeader
+		}
+		version.Name = current.LayerConfig.Id + "/VERSION"
+		if err := tw.WriteHeader(version); err != nil {
+			return nil, err
+		}
+		if _, err := tw.Write([]byte("1.0")); err != nil {
+			return nil, err
+		}
+
+		var jsonHdr = current.JsonHeader
+		if latestJsonHeader == nil {
+			latestJsonHeader = jsonHdr
+		}
+		if jsonHdr == nil {
+			jsonHdr = latestJsonHeader
+		}
+		jsonHdr.Name = current.LayerConfig.Id + "/json"
+		jsonBytes, err := json.Marshal(current.LayerConfig)
+		if err != nil {
+			return nil, err
+		}
+		jsonHdr.Size = int64(len(jsonBytes))
+		if err := tw.WriteHeader(jsonHdr); err != nil {
+			return nil, err
+		}
+		if _, err := tw.Write(jsonBytes); err != nil {
+			return nil, err
+		}
+
+		var layerTar = current.LayerTarHeader
+		if latestTarHeader == nil {
+			latestTarHeader = layerTar
+		}
+		if layerTar == nil {
+			layerTar = latestTarHeader
+		}
+		layerTar.Name = current.LayerConfig.Id + "/layer.tar"
+		layerTar.Size = int64(current.LayerTarBuffer.Len())
+		tw.WriteHeader(layerTar)
+		tw.Write(current.LayerTarBuffer.Bytes())
+	}
+	if err := tw.Close(); err != nil {
+		return nil, err
 	}
 
 	return out, nil
+}
+
+func deleteWhiteouts(files map[string]*tarFile, whiteouts []string) map[string]*tarFile {
+	for _, whiteout := range whiteouts {
+		prefix := strings.Replace(whiteout, ".wh.", "", 1)
+
+		for name, _ := range files {
+			if strings.HasPrefix(name, prefix) {
+				delete(files, name)
+			}
+		}
+	}
+
+	return files
 }
 
 func (e *Export) rewriteChildren(from *ExportedImage) error {
@@ -345,55 +424,26 @@ func (e *Export) rewriteChildren(from *ExportedImage) error {
 		}
 
 		cmd := strings.Join(entry.LayerConfig.ContainerConfig().Cmd, " ")
-		if len(cmd) > 50 {
-			cmd = cmd[:47] + "..."
-		}
 
-		if entry.LayerConfig.Id == squashId {
+		if entry.LayerConfig.Id == squashId || strings.Contains(cmd, "#(squash)") {
 			entry = e.ChildOf(entry.LayerConfig.Id)
 			continue
 		}
 
-		// if: we have a #(nop) that is not an ADD, "Replace" the layer
+		// if: we have a #(nop) that is not an ADD, skip it
 		// else: remove the stuff in the layer.tar
 		if strings.Contains(cmd, "#(nop)") && !strings.Contains(cmd, "ADD") {
-			newEntry, err := e.ReplaceLayer(entry.LayerConfig.Id)
-			if err != nil {
-				return err
-			}
-
-			entry = e.ChildOf(newEntry.LayerConfig.Id)
+			entry = e.ChildOf(entry.LayerConfig.Id)
 		} else {
 			Debugf("  -  Removing %s. Squashed. (%s)\n", entry.LayerConfig.Id[:12], cmd)
 
 			child := e.ChildOf(entry.LayerConfig.Id)
-			delete(e.Entries, entry.LayerConfig.Id)
-			if child == nil {
-				break
+			if child != nil {
+				child.LayerConfig.Parent = entry.LayerConfig.Parent
+				delete(e.Entries, entry.LayerConfig.Id)
 			}
-			child.LayerConfig.Parent = entry.LayerConfig.Parent
 			entry = child
 		}
 	}
-	return nil
-}
-
-func (e *Export) WriteRepositoriesJson() error {
-	//fp := filepath.Join(e.Path, "repositories")
-	//f, err := os.Create(fp)
-	//if err != nil {
-	//return err
-	//}
-	//defer f.Close()
-
-	//jb, err := json.Marshal(e.Repositories)
-	//if err != nil {
-	//return err
-	//}
-
-	//if _, err := f.WriteString(string(jb)); err != nil {
-	//return err
-	//}
-
 	return nil
 }

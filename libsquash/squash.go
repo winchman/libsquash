@@ -4,10 +4,8 @@ import (
 	"archive/tar"
 	"encoding/json"
 	"errors"
-	"io/ioutil"
-	//"path/filepath"
-	//"fmt"
 	"io"
+	"io/ioutil"
 	"os"
 	"strings"
 )
@@ -37,31 +35,35 @@ func Squash(inStream io.Reader, tempdir string) (io.Reader, error) {
 			continue
 		}
 
-		// if is json file
 		nameParts := strings.Split(header.Name, string(os.PathSeparator))
-		if len(nameParts) == 1 && nameParts[0] == "repositories" {
-			bytes, err := ioutil.ReadAll(tarReader)
-			if err != nil {
-				return nil, err
-			}
-			if err = json.Unmarshal(bytes, &export.Repositories); err != nil {
-				return nil, err
-			}
+		if len(nameParts) == 0 {
+			continue
 		}
 
-		if len(nameParts) != 2 {
+		if len(nameParts) == 1 {
+			if nameParts[0] == "repositories" {
+				bytes, err := ioutil.ReadAll(tarReader)
+				if err != nil {
+					return nil, err
+				}
+				if err = json.Unmarshal(bytes, &export.Repositories); err != nil {
+					return nil, err
+				}
+			}
 			continue
 		}
 
 		uuidPart := nameParts[0]
 		fileName := nameParts[1]
-
 		if export.Entries[uuidPart] == nil {
 			export.Entries[uuidPart] = &ExportedImage{}
 		}
 
 		switch fileName {
+		case "":
+			export.Entries[uuidPart].DirHeader = header
 		case "json":
+			export.Entries[uuidPart].JsonHeader = header
 			bytes, err := ioutil.ReadAll(tarReader)
 			if err != nil {
 				return nil, err
@@ -70,11 +72,13 @@ func Squash(inStream io.Reader, tempdir string) (io.Reader, error) {
 				return nil, err
 			}
 		case "layer.tar":
-			println("loading " + header.Name)
+			export.Entries[uuidPart].LayerTarHeader = header
 			_, err := export.Entries[uuidPart].LayerTarBuffer.ReadFrom(tarReader)
 			if err != nil {
 				return nil, err
 			}
+		case "VERSION":
+			export.Entries[uuidPart].VersionHeader = header
 		}
 	}
 
@@ -91,7 +95,7 @@ func Squash(inStream io.Reader, tempdir string) (io.Reader, error) {
 	}
 
 	start := export.FirstSquash()
-	// Can't find a previously squashed layer, use first FROM
+	// Can't find a previously squashed layer, use first ADD
 	if start == nil {
 		start = export.FirstFrom()
 	}
@@ -118,6 +122,7 @@ func Squash(inStream io.Reader, tempdir string) (io.Reader, error) {
 
 	// squash all later layers into our new layer
 	reader, err := export.SquashLayers(newEntry, start)
+	//reader, err := export.SquashLayers(newEntry, newEntry)
 	if err != nil {
 		return nil, err
 	}

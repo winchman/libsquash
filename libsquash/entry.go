@@ -5,12 +5,17 @@ import (
 	//"io/ioutil"
 	//"os"
 	//"os/exec"
+	"archive/tar"
 	"time"
 )
 
 type ExportedImage struct {
 	LayerConfig    *LayerConfig
 	LayerTarBuffer bytes.Buffer
+	DirHeader      *tar.Header
+	VersionHeader  *tar.Header
+	JsonHeader     *tar.Header
+	LayerTarHeader *tar.Header
 }
 
 func newLayerConfig(id, parent, comment string) *LayerConfig {
