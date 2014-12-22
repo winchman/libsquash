@@ -17,8 +17,8 @@ See [Squashing Docker Images](http://jasonwilder.com/blog/2014/08/19/squashing-d
 
 ## Installation
 
-```
-go install -o $GOPATH/bin/docker-squash
+```bash
+go install ./docker-squash
 ```
 
 ## Usage
