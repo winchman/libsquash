@@ -20,7 +20,7 @@ var (
 func Squash(inStream io.Reader) (io.Reader, error) {
 	var tarReader = tar.NewReader(inStream)
 
-	var export = NewExport()
+	var export = newExport()
 
 	for {
 		header, err := tarReader.Next()
@@ -130,7 +130,7 @@ func Squash(inStream io.Reader) (io.Reader, error) {
 	return reader, nil
 }
 
-func printVerbose(export *Export, newEntryID string) {
+func printVerbose(export *export, newEntryID string) {
 	e := export.Root()
 	for {
 		if e == nil {
