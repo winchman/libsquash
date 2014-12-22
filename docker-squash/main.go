@@ -19,19 +19,13 @@ var (
 	wg           sync.WaitGroup
 )
 
-func shutdown(tempdir string) {
+func shutdown() {
 	defer wg.Done()
 	<-signals
-	libsquash.Debugf("Removing tempdir %s\n", tempdir)
-	err := os.RemoveAll(tempdir)
-	if err != nil {
-		fatal(err)
-	}
-
 }
 
 func main() {
-	var from, input, output, tempdir, tag string
+	var from, input, output, tag string
 	var keepTemp, version bool
 	flag.StringVar(&input, "i", "", "Read from a tar archive file, instead of STDIN")
 	flag.StringVar(&output, "o", "", "Write to a file, instead of STDOUT")
@@ -55,10 +49,6 @@ func main() {
 	}
 
 	var err error
-	tempdir, err = ioutil.TempDir("", "docker-squash")
-	if err != nil {
-		fatal(err)
-	}
 
 	if tag != "" && strings.Contains(tag, ":") {
 		parts := strings.Split(tag, ":")
@@ -72,7 +62,7 @@ func main() {
 	if !keepTemp {
 		wg.Add(1)
 		signal.Notify(signals, os.Interrupt, os.Kill, syscall.SIGTERM)
-		go shutdown(tempdir)
+		go shutdown()
 	}
 
 	ir := os.Stdin
@@ -84,7 +74,7 @@ func main() {
 		}
 	}
 
-	reader, err := libsquash.Squash(ir, tempdir)
+	reader, err := libsquash.Squash(ir)
 	if err != nil {
 		fatal(err)
 	}
