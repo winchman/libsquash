@@ -1,6 +1,8 @@
 libsquash
 =========
 
+[![GoDoc](https://godoc.org/github.com/rafecolton/libsquash?status.svg)](https://godoc.org/github.com/rafecolton/libsquash)
+
 This is based on
 [https://github.com/jwilder/docker-squash](https://github.com/jwilder/docker-squash),
 but the squashing functionality is extracted into a library that runs
