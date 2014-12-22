@@ -1,27 +1,36 @@
 libsquash
 =========
 
+## Library
+
 [![GoDoc](https://godoc.org/github.com/rafecolton/libsquash?status.svg)](https://godoc.org/github.com/rafecolton/libsquash)
 
 This is based on
-[https://github.com/jwilder/docker-squash](https://github.com/jwilder/docker-squash),
-but the squashing functionality is extracted into a library that runs
-the extraction without writing any files to disk.
+[jwilder/docker-squash](https://github.com/jwilder/docker-squash),
+but the squashing functionality is extracted into a package named
+`libsquash`
 
-It can also be used as an executable, although that functionality is
-intended only as an example.
+`libsquash` is different from `docker-squash` in that `libsquash`...
 
-See [Squashing Docker Images](http://jasonwilder.com/blog/2014/08/19/squashing-docker-images/)
+0. does not write to disk
+0. does not require `sudo`
+0. does not depend on the installation of any particular version of
+   `tar` (or any version at all)
 
-[Sample output](_docs/sample-output.md)
+Other information:
 
-## Installation
+* Article: [Squashing Docker Images](http://jasonwilder.com/blog/2014/08/19/squashing-docker-images/)
+* [Sample output](_docs/sample-output.md)
+
+## Binary
+
+### Installation
 
 ```bash
-go install ./docker-squash
+go get github.com/winchman/libsquash/docker-squash
 ```
 
-## Usage
+### Usage
 
 docker-squash works by squashing a saved image and loading the squashed image back into docker.
 
