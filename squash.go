@@ -56,7 +56,7 @@ func Squash(inStream io.Reader) (io.Reader, error) {
 		uuidPart := nameParts[0]
 		fileName := nameParts[1]
 		if export.Entries[uuidPart] == nil {
-			export.Entries[uuidPart] = &ExportedImage{}
+			export.Entries[uuidPart] = &exportedImage{}
 		}
 
 		switch fileName {
@@ -114,7 +114,7 @@ func Squash(inStream io.Reader) (io.Reader, error) {
 		return nil, err
 	}
 
-	Debugf("Inserted new layer %s after %s\n", newEntry.LayerConfig.Id[0:12], newEntry.LayerConfig.Parent[0:12])
+	debugf("Inserted new layer %s after %s\n", newEntry.LayerConfig.Id[0:12], newEntry.LayerConfig.Parent[0:12])
 
 	if Verbose {
 		printVerbose(export, newEntry.LayerConfig.Id)
@@ -142,9 +142,9 @@ func printVerbose(export *export, newEntryID string) {
 		}
 
 		if e.LayerConfig.Id == newEntryID {
-			Debugf("  -> %s %s\n", e.LayerConfig.Id[0:12], cmd)
+			debugf("  -> %s %s\n", e.LayerConfig.Id[0:12], cmd)
 		} else {
-			Debugf("  -  %s %s\n", e.LayerConfig.Id[0:12], cmd)
+			debugf("  -  %s %s\n", e.LayerConfig.Id[0:12], cmd)
 		}
 		e = export.ChildOf(e.LayerConfig.Id)
 	}

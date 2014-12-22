@@ -88,9 +88,13 @@ func main() {
 		if err != nil {
 			fatal(err)
 		}
-		libsquash.Debugf("Tarring new image to %s\n", output)
+		if libsquash.Verbose {
+			fmt.Printf("Tarring new image to %s\n", output)
+		}
 	} else {
-		libsquash.Debugf("Tarring new image to STDOUT\n")
+		if libsquash.Verbose {
+			fmt.Printf("Tarring new image to STDOUT\n")
+		}
 	}
 
 	byteArr, err := ioutil.ReadAll(reader)
@@ -102,7 +106,9 @@ func main() {
 		fatal(err)
 	}
 
-	libsquash.Debug("Done. New image created.")
+	if libsquash.Verbose {
+		fmt.Println("Done. New image created.")
+	}
 
 	signals <- os.Interrupt
 	wg.Wait()

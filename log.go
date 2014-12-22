@@ -7,13 +7,13 @@ import (
 
 var Verbose bool
 
-func Debugf(format string, args ...interface{}) {
+func debugf(format string, args ...interface{}) {
 	if Verbose {
 		fmt.Fprintf(os.Stderr, fmt.Sprintf("%s", format), args...)
 	}
 }
 
-func Debug(args ...interface{}) {
+func debug(args ...interface{}) {
 	if Verbose {
 		fmt.Fprintln(os.Stderr, args...)
 	}
