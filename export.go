@@ -226,101 +226,104 @@ func (e *export) SquashLayers(into, from *exportedImage) (io.Reader, error) {
 	}
 
 	var out = new(bytes.Buffer)
-	var tw = tar.NewWriter(out)
-	var latestDirHeader, latestVersionHeader, latestJsonHeader, latestTarHeader *tar.Header
 
-	debug("  -  Rewriting child history")
-	if err := e.rewriteChildren(into); err != nil {
-		return nil, err
-	}
+	go func() {
+		var tw = tar.NewWriter(out)
+		var latestDirHeader, latestVersionHeader, latestJsonHeader, latestTarHeader *tar.Header
 
-	squashedLayerConfig := into.LayerConfig
-	last := e.LastChild().LayerConfig
-
-	squashedLayerConfig.V2ContainerConfig = augmentSquashed(squashedLayerConfig, last)
-	squashedLayerConfig.Config = augmentSquashedConfig(squashedLayerConfig, last)
-
-	current = from
-	order = []*exportedImage{}
-	for {
-		order = append(order, current)
-		current = e.ChildOf(current.LayerConfig.Id)
-		if current == nil {
-			break
-		}
-	}
-
-	for _, current := range order {
-		var dir = current.DirHeader
-		if latestDirHeader == nil {
-			latestDirHeader = dir
-		}
-		if dir == nil {
-			dir = latestDirHeader
-		}
-		dir.Name = current.LayerConfig.Id + "/"
-		if err := tw.WriteHeader(dir); err != nil {
-			return nil, err
+		debug("  -  Rewriting child history")
+		if err := e.rewriteChildren(into); err != nil {
+			//return nil, err
 		}
 
-		var version = current.VersionHeader
-		if latestVersionHeader == nil {
-			latestVersionHeader = version
-		}
-		if version == nil {
-			version = latestVersionHeader
-		}
-		version.Name = current.LayerConfig.Id + "/VERSION"
-		if err := tw.WriteHeader(version); err != nil {
-			return nil, err
-		}
-		if _, err := tw.Write([]byte("1.0")); err != nil {
-			return nil, err
+		squashedLayerConfig := into.LayerConfig
+		last := e.LastChild().LayerConfig
+
+		squashedLayerConfig.V2ContainerConfig = augmentSquashed(squashedLayerConfig, last)
+		squashedLayerConfig.Config = augmentSquashedConfig(squashedLayerConfig, last)
+
+		current = from
+		order = []*exportedImage{}
+		for {
+			order = append(order, current)
+			current = e.ChildOf(current.LayerConfig.Id)
+			if current == nil {
+				break
+			}
 		}
 
-		var jsonHdr = current.JsonHeader
-		if latestJsonHeader == nil {
-			latestJsonHeader = jsonHdr
-		}
-		if jsonHdr == nil {
-			jsonHdr = latestJsonHeader
-		}
-		jsonHdr.Name = current.LayerConfig.Id + "/json"
+		for _, current := range order {
+			var dir = current.DirHeader
+			if latestDirHeader == nil {
+				latestDirHeader = dir
+			}
+			if dir == nil {
+				dir = latestDirHeader
+			}
+			dir.Name = current.LayerConfig.Id + "/"
+			if err := tw.WriteHeader(dir); err != nil {
+				//return nil, err
+			}
 
-		var jsonBytes []byte
-		var err error
-		if current.LayerConfig.Id == into.LayerConfig.Id {
-			jsonBytes, err = json.Marshal(squashedLayerConfig)
-		} else {
-			jsonBytes, err = json.Marshal(current.LayerConfig)
+			var version = current.VersionHeader
+			if latestVersionHeader == nil {
+				latestVersionHeader = version
+			}
+			if version == nil {
+				version = latestVersionHeader
+			}
+			version.Name = current.LayerConfig.Id + "/VERSION"
+			if err := tw.WriteHeader(version); err != nil {
+				//return nil, err
+			}
+			if _, err := tw.Write([]byte("1.0")); err != nil {
+				//return nil, err
+			}
+
+			var jsonHdr = current.JsonHeader
+			if latestJsonHeader == nil {
+				latestJsonHeader = jsonHdr
+			}
+			if jsonHdr == nil {
+				jsonHdr = latestJsonHeader
+			}
+			jsonHdr.Name = current.LayerConfig.Id + "/json"
+
+			var jsonBytes []byte
+			var err error
+			if current.LayerConfig.Id == into.LayerConfig.Id {
+				jsonBytes, err = json.Marshal(squashedLayerConfig)
+			} else {
+				jsonBytes, err = json.Marshal(current.LayerConfig)
+			}
+			if err != nil {
+				//return nil, err
+			}
+			jsonHdr.Size = int64(len(jsonBytes))
+			if err := tw.WriteHeader(jsonHdr); err != nil {
+				//return nil, err
+			}
+			if _, err := tw.Write(jsonBytes); err != nil {
+				//return nil, err
+			}
+
+			var layerTar = current.LayerTarHeader
+			if latestTarHeader == nil {
+				latestTarHeader = layerTar
+			}
+			if layerTar == nil {
+				layerTar = latestTarHeader
+			}
+			layerTar.Name = current.LayerConfig.Id + "/layer.tar"
+			layerTar.Size = int64(current.LayerTarBuffer.Len())
+			tw.WriteHeader(layerTar)
+			tw.Write(current.LayerTarBuffer.Bytes())
 		}
-		if err != nil {
-			return nil, err
-		}
-		jsonHdr.Size = int64(len(jsonBytes))
-		if err := tw.WriteHeader(jsonHdr); err != nil {
-			return nil, err
-		}
-		if _, err := tw.Write(jsonBytes); err != nil {
-			return nil, err
+		if err := tw.Close(); err != nil {
+			//return nil, err
 		}
 
-		var layerTar = current.LayerTarHeader
-		if latestTarHeader == nil {
-			latestTarHeader = layerTar
-		}
-		if layerTar == nil {
-			layerTar = latestTarHeader
-		}
-		layerTar.Name = current.LayerConfig.Id + "/layer.tar"
-		layerTar.Size = int64(current.LayerTarBuffer.Len())
-		tw.WriteHeader(layerTar)
-		tw.Write(current.LayerTarBuffer.Bytes())
-	}
-	if err := tw.Close(); err != nil {
-		return nil, err
-	}
-
+	}()
 	return out, nil
 }
 

@@ -17,9 +17,8 @@ var (
 	errorNoFROM = errors.New("no layer matching FROM")
 )
 
-func Squash(inStream io.Reader) (io.Reader, error) {
-	var tarReader = tar.NewReader(inStream)
-
+func Squash(instream io.Reader) (outstream io.Reader, err error) {
+	var tarReader = tar.NewReader(instream)
 	var export = newExport()
 
 	for {
