@@ -3,7 +3,7 @@ FROM golang:1.3.3
 ENV HOME /root
 ENV DEBIAN_FRONTEND noninteractive
 
-WORKDIR $GOPATH/src/github.com/rafecolton/libsquash
+WORKDIR $GOPATH/src/github.com/winchman/libsquash
 ADD Deps Deps
 RUN go get github.com/hamfist/deppy && \
   deppy restore && \
@@ -22,6 +22,6 @@ RUN export BIN=/usr/local/bin && \
   curl -sL http://stedolan.github.io/jq/download/linux64/jq -o $BIN/jq && \
   chmod +x $BIN/jq
 
-ADD . $GOPATH/src/github.com/rafecolton/libsquash
+ADD . $GOPATH/src/github.com/winchman/libsquash
 ADD .docker/extract /usr/local/bin/extract
 RUN go get ./... && go install ./docker-squash

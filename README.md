@@ -3,7 +3,7 @@ libsquash
 
 ## Library
 
-[![GoDoc](https://godoc.org/github.com/rafecolton/libsquash?status.svg)](https://godoc.org/github.com/rafecolton/libsquash)
+[![GoDoc](https://godoc.org/github.com/winchman/libsquash?status.svg)](https://godoc.org/github.com/winchman/libsquash)
 
 This is based on
 [jwilder/docker-squash](https://github.com/jwilder/docker-squash),
@@ -74,12 +74,6 @@ If you are creating a base image or only want one final squashed layer, you can 
 ```
 $ docker save <image_id> | sudo docker-squash -from root -t newtag | docker load
 ```
-
-## Known Issues
-
-Currently, squashing an image may remove or invalidate the `ENTRYPOINT` and `CMD`
-layers - they may need to be specified on the command line when running
-the image.
 
 ## License
 
