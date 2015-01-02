@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"os"
 	"regexp"
 	"strings"
@@ -361,12 +360,10 @@ func (e *export) SquashLayers(into, from *exportedImage, instream io.Reader, out
 				}
 				filePath := nameWithoutWhiteoutPrefix(fileHeader.Name)
 				if e.layerToFiles[uuidPart][filePath] {
-					fileBytes, err := ioutil.ReadAll(layerReader) //TODO: get rid of ReadAll if possible
-					if err != nil {
+					squashLayerTarWriter.WriteHeader(fileHeader)
+					if _, err := io.Copy(squashLayerTarWriter, layerReader); err != nil {
 						return err
 					}
-					squashLayerTarWriter.WriteHeader(fileHeader)
-					squashLayerTarWriter.Write(fileBytes)
 				}
 			}
 		case "VERSION":
