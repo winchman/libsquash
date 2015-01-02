@@ -1,7 +1,6 @@
 package libsquash
 
 import (
-	"bytes"
 	"errors"
 	"io"
 	"strings"
@@ -14,16 +13,16 @@ var (
 	errorNoFROM = errors.New("no layer matching FROM")
 )
 
-func Squash(instream io.Reader, instream2 io.Reader) (outstream io.Reader, err error) {
+func Squash(instream io.Reader, instream2 io.Reader, outstream io.Writer) (err error) {
 	var export = newExport()
-	outstream = new(bytes.Buffer)
 
+	// populate metadata from first stream
 	export.parseLayerMetadata(instream)
 
 	// insert a new layer after our squash point
 	newEntry, err := export.InsertLayer(export.start.LayerConfig.Id)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	debugf("Inserted new layer %s after %s\n", newEntry.LayerConfig.Id[0:12], newEntry.LayerConfig.Parent[0:12])
@@ -32,12 +31,8 @@ func Squash(instream io.Reader, instream2 io.Reader) (outstream io.Reader, err e
 		printVerbose(export, newEntry.LayerConfig.Id)
 	}
 
-	// squash all later layers into our new layer
-	if err := export.SquashLayers(newEntry, export.start, instream2, outstream.(io.Writer)); err != nil {
-		return nil, err
-	}
-
-	return outstream, nil
+	// squash all later layers into our new layer (from second stream)
+	return export.SquashLayers(newEntry, export.start, instream2, outstream)
 }
 
 func printVerbose(export *export, newEntryID string) {
