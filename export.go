@@ -2,11 +2,11 @@ package libsquash
 
 import (
 	"archive/tar"
-	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"os"
 	"regexp"
 	"strings"
@@ -20,18 +20,39 @@ type TagInfo map[string]string
 type export struct {
 	Entries      map[string]*exportedImage
 	Repositories map[string]*TagInfo
+	fileToLayers map[string][]fileLoc
+	layerToFiles map[string]map[string]bool
+	start        *exportedImage
+	whiteouts    []whiteoutFile
 }
 
-type tarFile struct {
-	Contents *bytes.Buffer
-	Header   *tar.Header
+type fileLoc struct {
+	uuid     string
+	whiteout bool // to indicate that the file as presented in this layer is a whiteout instead of a regular file
+}
+
+type whiteoutFile struct {
+	uuid   string // the layer in which the whiteout was found
+	prefix string // the file name prefix (without the ".wh." part)
 }
 
 func newExport() *export {
 	return &export{
 		Entries:      map[string]*exportedImage{},
 		Repositories: map[string]*TagInfo{},
+		fileToLayers: map[string][]fileLoc{},
+		layerToFiles: map[string]map[string]bool{},
+		whiteouts:    []whiteoutFile{},
 	}
+}
+
+func (e *export) matchesWhiteout(filename string) (uuidContainingWhiteout string, matches bool) {
+	for _, whiteout := range e.whiteouts {
+		if strings.HasPrefix(filename, whiteout.prefix) {
+			return whiteout.uuid, true
+		}
+	}
+	return "", false
 }
 
 func (e *export) firstLayer(pattern string) *exportedImage {
@@ -156,83 +177,215 @@ func (e *export) ReplaceLayer(oldId string) (*exportedImage, error) {
 
 	e.Entries[id] = entry
 
+	orig.LayerTarBuffer.Reset()
 	delete(e.Entries, oldId)
 
 	return entry, nil
 }
 
-// to => newEntry (squash layer), from => "start"
-func (e *export) SquashLayers(into, from *exportedImage) (io.Reader, error) {
-	debugf("Squashing from %s into %s\n", from.LayerConfig.Id[:12], into.LayerConfig.Id[:12])
-
-	var files = map[string]*tarFile{}
-	var whiteouts = []string{}
-
-	var current = from
-	var order = []*exportedImage{}
+func (e *export) parseLayerMetadata(instream io.Reader) error {
+	var tarReader = tar.NewReader(instream)
 	for {
-		order = append(order, current)
+		header, err := tarReader.Next()
+		if err != nil {
+			if err == io.EOF {
+				break
+			}
+			return err
+		}
+
+		if header.Name == "." || header.Name == ".." || header.Name == "./" {
+			continue
+		}
+
+		nameParts := strings.Split(header.Name, string(os.PathSeparator))
+		if len(nameParts) == 0 {
+			continue
+		}
+
+		if len(nameParts) == 1 {
+			if nameParts[0] == "repositories" {
+				if err = json.NewDecoder(tarReader).Decode(&e.Repositories); err != nil {
+					return err
+				}
+			}
+
+			// Export may have multiple branches with the same parent.
+			// We can't handle that currently so abort.
+			for _, v := range e.Repositories {
+				commits := map[string]string{}
+				for tag, commit := range *v {
+					commits[commit] = tag
+				}
+				if len(commits) > 1 {
+					return errorMultipleBranchesSameParent
+				}
+			}
+
+			continue
+		}
+
+		uuidPart := nameParts[0]
+		fileName := nameParts[1]
+		if e.Entries[uuidPart] == nil {
+			e.Entries[uuidPart] = &exportedImage{}
+		}
+
+		switch fileName {
+		case "json":
+			e.Entries[uuidPart].JsonHeader = header
+			if err = json.NewDecoder(tarReader).Decode(&e.Entries[uuidPart].LayerConfig); err != nil {
+				return err
+			}
+		case "layer.tar":
+			layerReader := tar.NewReader(tarReader)
+			for {
+				fileHeader, err := layerReader.Next()
+				if err != nil {
+					if err == io.EOF {
+						break
+					}
+					return err
+				}
+				filePath := nameWithoutWhiteoutPrefix(fileHeader.Name)
+				if e.fileToLayers[filePath] == nil {
+					e.fileToLayers[filePath] = []fileLoc{}
+				}
+				foundWhiteout := isWhiteout(fileHeader.Name)
+				e.fileToLayers[filePath] = append(e.fileToLayers[filePath], fileLoc{
+					uuid:     uuidPart,
+					whiteout: foundWhiteout,
+				})
+
+				if foundWhiteout {
+					e.whiteouts = append(e.whiteouts, whiteoutFile{
+						prefix: filePath,
+						uuid:   uuidPart,
+					})
+				}
+			}
+		}
+	}
+
+	e.start = e.FirstSquash()
+	// Can't find a previously squashed layer, use first ADD
+	if e.start == nil {
+		e.start = e.FirstFrom()
+	}
+	// Can't find a FROM, default to root
+	if e.start == nil {
+		e.start = e.Root()
+	}
+
+	if e.start == nil {
+		return errorNoFROM
+	}
+
+	// TODO: optimize creation of ordered list - currently n^2, can be n
+	index := 0
+	current := e.start
+	orderMap := map[string]int{}
+	for {
+		orderMap[current.LayerConfig.Id] = index
+		index++
 		current = e.ChildOf(current.LayerConfig.Id)
 		if current == nil {
 			break
 		}
 	}
 
-	for _, current := range order {
-		subtar := tar.NewReader(&current.LayerTarBuffer)
-
-		for {
-			header, err := subtar.Next()
-			if err != nil {
-				if err == io.EOF {
-					break
-				}
-				return nil, err
-			}
-			nameParts := strings.Split(header.Name, string(os.PathSeparator))
-			fileName := nameParts[len(nameParts)-1]
-			// skip whiteout files
-			if strings.HasPrefix(fileName, ".wh.") {
-				whiteouts = append(whiteouts, header.Name)
-				continue
-			}
-
-			if files[header.Name] == nil {
-				files[header.Name] = &tarFile{
-					Contents: new(bytes.Buffer),
-					Header:   header,
+	for path, fileLocs := range e.fileToLayers {
+		if len(fileLocs) > 0 {
+			greatest := fileLocs[0]
+			for _, loc := range fileLocs {
+				if orderMap[loc.uuid] > orderMap[greatest.uuid] {
+					greatest = loc
 				}
 			}
-
-			files[header.Name].Contents.Reset()
-			if _, err = files[header.Name].Contents.ReadFrom(subtar); err != nil {
-				return nil, err
+			if e.layerToFiles[greatest.uuid] == nil {
+				e.layerToFiles[greatest.uuid] = map[string]bool{}
+			}
+			/*
+				if name matches whiteout prefix and the whiteout file is found in a layer that is >= greatest.uuid, skip
+			*/
+			uuidContainingWhiteout, matches := e.matchesWhiteout(path)
+			if (matches && orderMap[uuidContainingWhiteout] >= orderMap[greatest.uuid]) || greatest.whiteout {
+				delete(e.layerToFiles[greatest.uuid], path)
+			} else {
+				e.layerToFiles[greatest.uuid][path] = true
 			}
 		}
 	}
 
-	files = deleteWhiteouts(files, whiteouts)
+	return nil
+}
 
-	// tar writer for layer.tar for new squash layer
+func (e *export) SquashLayers(into, from *exportedImage, instream io.Reader, outstream io.Writer) error {
 	var squashLayerTarWriter = tar.NewWriter(&into.LayerTarBuffer)
 
-	// create layer.tar for squash layer
-	for _, file := range files {
-		squashLayerTarWriter.WriteHeader(file.Header)
-		squashLayerTarWriter.Write(file.Contents.Bytes())
+	var tarReader = tar.NewReader(instream)
+	for {
+		header, err := tarReader.Next()
+		if err != nil {
+			if err == io.EOF {
+				break
+			}
+			return err
+		}
+
+		if header.Name == "." || header.Name == ".." || header.Name == "./" {
+			continue
+		}
+
+		nameParts := strings.Split(header.Name, string(os.PathSeparator))
+		if len(nameParts) == 0 {
+			continue
+		}
+
+		uuidPart := nameParts[0]
+		fileName := nameParts[1]
+
+		switch fileName {
+		case "":
+			e.Entries[uuidPart].DirHeader = header
+		case "layer.tar":
+			e.Entries[uuidPart].LayerTarHeader = header
+			layerReader := tar.NewReader(tarReader)
+			for {
+				fileHeader, err := layerReader.Next()
+				if err != nil {
+					if err == io.EOF {
+						break
+					}
+					return err
+				}
+				filePath := nameWithoutWhiteoutPrefix(fileHeader.Name)
+				if e.layerToFiles[uuidPart][filePath] {
+					fileBytes, err := ioutil.ReadAll(layerReader) //TODO: get rid of ReadAll if possible
+					if err != nil {
+						return err
+					}
+					squashLayerTarWriter.WriteHeader(fileHeader)
+					squashLayerTarWriter.Write(fileBytes)
+				}
+			}
+		case "VERSION":
+			e.Entries[uuidPart].VersionHeader = header
+		}
 	}
+
+	debugf("Squashing from %s into %s\n", from.LayerConfig.Id[:12], into.LayerConfig.Id[:12])
+
 	if err := squashLayerTarWriter.Close(); err != nil {
-		return nil, err
+		return err
 	}
 
-	var out = new(bytes.Buffer)
-
-	var tw = tar.NewWriter(out)
+	var tw = tar.NewWriter(outstream)
 	var latestDirHeader, latestVersionHeader, latestJsonHeader, latestTarHeader *tar.Header
 
 	debug("  -  Rewriting child history")
 	if err := e.rewriteChildren(into); err != nil {
-		return nil, err
+		return err
 	}
 
 	squashedLayerConfig := into.LayerConfig
@@ -241,8 +394,8 @@ func (e *export) SquashLayers(into, from *exportedImage) (io.Reader, error) {
 	squashedLayerConfig.V2ContainerConfig = augmentSquashed(squashedLayerConfig, last)
 	squashedLayerConfig.Config = augmentSquashedConfig(squashedLayerConfig, last)
 
-	current = from
-	order = []*exportedImage{}
+	current := from
+	order := []*exportedImage{} // TODO: optimize, remove this
 	for {
 		order = append(order, current)
 		current = e.ChildOf(current.LayerConfig.Id)
@@ -261,7 +414,7 @@ func (e *export) SquashLayers(into, from *exportedImage) (io.Reader, error) {
 		}
 		dir.Name = current.LayerConfig.Id + "/"
 		if err := tw.WriteHeader(dir); err != nil {
-			return nil, err
+			return err
 		}
 
 		var version = current.VersionHeader
@@ -273,10 +426,10 @@ func (e *export) SquashLayers(into, from *exportedImage) (io.Reader, error) {
 		}
 		version.Name = current.LayerConfig.Id + "/VERSION"
 		if err := tw.WriteHeader(version); err != nil {
-			return nil, err
+			return err
 		}
 		if _, err := tw.Write([]byte("1.0")); err != nil {
-			return nil, err
+			return err
 		}
 
 		var jsonHdr = current.JsonHeader
@@ -296,14 +449,14 @@ func (e *export) SquashLayers(into, from *exportedImage) (io.Reader, error) {
 			jsonBytes, err = json.Marshal(current.LayerConfig)
 		}
 		if err != nil {
-			return nil, err
+			return err
 		}
 		jsonHdr.Size = int64(len(jsonBytes))
 		if err := tw.WriteHeader(jsonHdr); err != nil {
-			return nil, err
+			return err
 		}
 		if _, err := tw.Write(jsonBytes); err != nil {
-			return nil, err
+			return err
 		}
 
 		var layerTar = current.LayerTarHeader
@@ -318,25 +471,8 @@ func (e *export) SquashLayers(into, from *exportedImage) (io.Reader, error) {
 		tw.WriteHeader(layerTar)
 		tw.Write(current.LayerTarBuffer.Bytes())
 	}
-	if err := tw.Close(); err != nil {
-		return nil, err
-	}
 
-	return out, nil
-}
-
-func deleteWhiteouts(files map[string]*tarFile, whiteouts []string) map[string]*tarFile {
-	for _, whiteout := range whiteouts {
-		prefix := strings.Replace(whiteout, ".wh.", "", 1)
-
-		for name, _ := range files {
-			if strings.HasPrefix(name, prefix) {
-				delete(files, name)
-			}
-		}
-	}
-
-	return files
+	return tw.Close()
 }
 
 func (e *export) rewriteChildren(from *exportedImage) error {
@@ -367,130 +503,10 @@ func (e *export) rewriteChildren(from *exportedImage) error {
 			if child != nil {
 				child.LayerConfig.Parent = entry.LayerConfig.Parent
 			}
+			entry.LayerTarBuffer.Reset()
 			delete(e.Entries, entry.LayerConfig.Id)
 			entry = child
 		}
 	}
 	return nil
-}
-
-func augmentSquashed(s, l *LayerConfig) *ContainerConfig {
-	squashed := s.ContainerConfig()
-	last := l.ContainerConfig()
-
-	if len(squashed.Hostname) == 0 {
-		squashed.Hostname = last.Hostname
-	}
-	if len(squashed.Domainname) == 0 {
-		squashed.Domainname = last.Domainname
-	}
-	if len(squashed.Entrypoint) == 0 {
-		squashed.Entrypoint = last.Entrypoint
-	}
-	if len(squashed.User) == 0 {
-		squashed.User = last.User
-	}
-	if squashed.Memory == 0 {
-		squashed.Memory = last.Memory
-	}
-	if squashed.MemorySwap == 0 {
-		squashed.MemorySwap = last.MemorySwap
-	}
-	if squashed.CpuShares == 0 {
-		squashed.CpuShares = last.CpuShares
-	}
-
-	squashed.AttachStdin = squashed.AttachStdin || last.AttachStdin
-	squashed.AttachStdout = squashed.AttachStdout || last.AttachStdout
-	squashed.AttachStderr = squashed.AttachStderr || last.AttachStderr
-
-	if len(squashed.PortSpecs) == 0 {
-		squashed.PortSpecs = last.PortSpecs
-	}
-
-	squashed.Tty = squashed.Tty || last.Tty
-	squashed.OpenStdin = squashed.OpenStdin || last.OpenStdin
-	squashed.StdinOnce = squashed.StdinOnce || last.StdinOnce
-	squashed.NetworkDisabled = squashed.NetworkDisabled || last.NetworkDisabled
-
-	if len(squashed.OnBuild) == 0 {
-		squashed.OnBuild = last.OnBuild
-	}
-	if len(squashed.Env) == 0 {
-		squashed.Env = last.Env
-	}
-	if len(squashed.Volumes) == 0 {
-		squashed.Volumes = last.Volumes
-	}
-	if len(squashed.VolumesFrom) == 0 {
-		squashed.VolumesFrom = last.VolumesFrom
-	}
-
-	return squashed
-}
-
-func augmentSquashedConfig(s, l *LayerConfig) *Config {
-	squashed := s.Config
-	if squashed == nil {
-		squashed = &Config{}
-	}
-	last := l.Config
-
-	if len(squashed.Hostname) == 0 {
-		squashed.Hostname = last.Hostname
-	}
-	if len(squashed.Domainname) == 0 {
-		squashed.Domainname = last.Domainname
-	}
-	if len(squashed.Entrypoint) == 0 {
-		squashed.Entrypoint = last.Entrypoint
-	}
-	if len(squashed.User) == 0 {
-		squashed.User = last.User
-	}
-	if squashed.Memory == 0 {
-		squashed.Memory = last.Memory
-	}
-	if squashed.MemorySwap == 0 {
-		squashed.MemorySwap = last.MemorySwap
-	}
-	if squashed.CpuShares == 0 {
-		squashed.CpuShares = last.CpuShares
-	}
-
-	squashed.AttachStdin = squashed.AttachStdin || last.AttachStdin
-	squashed.AttachStdout = squashed.AttachStdout || last.AttachStdout
-	squashed.AttachStderr = squashed.AttachStderr || last.AttachStderr
-
-	if len(squashed.PortSpecs) == 0 {
-		squashed.PortSpecs = last.PortSpecs
-	}
-
-	squashed.Tty = squashed.Tty || last.Tty
-	squashed.OpenStdin = squashed.OpenStdin || last.OpenStdin
-	squashed.StdinOnce = squashed.StdinOnce || last.StdinOnce
-	squashed.NetworkDisabled = squashed.NetworkDisabled || last.NetworkDisabled
-
-	if len(squashed.OnBuild) == 0 {
-		squashed.OnBuild = last.OnBuild
-	}
-	if len(squashed.Env) == 0 {
-		squashed.Env = last.Env
-	}
-	if len(squashed.Volumes) == 0 {
-		squashed.Volumes = last.Volumes
-	}
-	if len(squashed.VolumesFrom) == 0 {
-		squashed.VolumesFrom = last.VolumesFrom
-	}
-
-	if len(squashed.WorkingDir) == 0 {
-		squashed.WorkingDir = last.WorkingDir
-	}
-
-	if len(squashed.ExposedPorts) == 0 {
-		squashed.ExposedPorts = last.ExposedPorts
-	}
-
-	return squashed
 }
