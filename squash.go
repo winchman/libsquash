@@ -3,6 +3,8 @@ package libsquash
 import (
 	"errors"
 	"io"
+	"io/ioutil"
+	"os"
 	"strings"
 )
 
@@ -13,11 +15,27 @@ var (
 	errorNoFROM = errors.New("no layer matching FROM")
 )
 
-func Squash(instream io.Reader, instream2 io.Reader, outstream io.Writer) (err error) {
-	var export = newExport()
+func Squash(instream io.Reader, outstream io.Writer) error {
+	export := newExport()
+	tempfile, err := ioutil.TempFile("", "libsquash")
+	if err != nil {
+		return err
+	}
+
+	defer func() {
+		_ = tempfile.Close()
+		_ = os.RemoveAll(tempfile.Name())
+	}()
+
+	instreamTee := io.TeeReader(instream, tempfile)
 
 	// populate metadata from first stream
-	export.parseLayerMetadata(instream)
+	export.parseLayerMetadata(instreamTee)
+
+	// rewind tempfile to the entire tar stream can be read back in
+	if _, err = tempfile.Seek(0, 0); err != nil {
+		return err
+	}
 
 	// insert a new layer after our squash point
 	newEntry, err := export.InsertLayer(export.start.LayerConfig.Id)
@@ -32,7 +50,7 @@ func Squash(instream io.Reader, instream2 io.Reader, outstream io.Writer) (err e
 	}
 
 	// squash all later layers into our new layer (from second stream)
-	return export.SquashLayers(newEntry, export.start, instream2, outstream)
+	return export.SquashLayers(newEntry, export.start, tempfile, outstream)
 }
 
 func printVerbose(export *export, newEntryID string) {
