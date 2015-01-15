@@ -5,6 +5,8 @@ import (
 	"os"
 )
 
+// Verbose will print out debugging info when set to true. Should be set
+// manually in code only for debugging purposes
 var Verbose bool
 
 func debugf(format string, args ...interface{}) {

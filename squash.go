@@ -15,6 +15,11 @@ var (
 	errorNoFROM = errors.New("no layer matching FROM")
 )
 
+/*
+Squash squashes a docker image where instream is an io.Reader for the image
+tarball, outstream is an io.Writer to which the squashed image tarball will be written,
+and imageIDOut is an io.Writer to which the id of the squashed image will be written
+*/
 func Squash(instream io.Reader, outstream io.Writer, imageIDOut io.Writer) error {
 	export := newExport()
 	tempfile, err := ioutil.TempFile("", "libsquash")
@@ -38,15 +43,15 @@ func Squash(instream io.Reader, outstream io.Writer, imageIDOut io.Writer) error
 	}
 
 	// insert a new layer after our squash point
-	newEntry, err := export.InsertLayer(export.start.LayerConfig.Id)
+	newEntry, err := export.InsertLayer(export.start.LayerConfig.ID)
 	if err != nil {
 		return err
 	}
 
-	debugf("Inserted new layer %s after %s\n", newEntry.LayerConfig.Id[0:12], newEntry.LayerConfig.Parent[0:12])
+	debugf("Inserted new layer %s after %s\n", newEntry.LayerConfig.ID[0:12], newEntry.LayerConfig.Parent[0:12])
 
 	if Verbose {
-		printVerbose(export, newEntry.LayerConfig.Id)
+		printVerbose(export, newEntry.LayerConfig.ID)
 	}
 
 	// squash all later layers into our new layer (from second stream)
@@ -73,11 +78,11 @@ func printVerbose(export *export, newEntryID string) {
 			cmd = cmd[:60]
 		}
 
-		if e.LayerConfig.Id == newEntryID {
-			debugf("  -> %s %s\n", e.LayerConfig.Id[0:12], cmd)
+		if e.LayerConfig.ID == newEntryID {
+			debugf("  -> %s %s\n", e.LayerConfig.ID[0:12], cmd)
 		} else {
-			debugf("  -  %s %s\n", e.LayerConfig.Id[0:12], cmd)
+			debugf("  -  %s %s\n", e.LayerConfig.ID[0:12], cmd)
 		}
-		e = export.ChildOf(e.LayerConfig.Id)
+		e = export.ChildOf(e.LayerConfig.ID)
 	}
 }

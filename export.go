@@ -4,7 +4,6 @@ import (
 	"archive/tar"
 	"bytes"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -15,11 +14,11 @@ import (
 
 var uuidRegex = regexp.MustCompile("^[a-f0-9]{64}$")
 
-type TagInfo map[string]string
+type tagInfo map[string]string
 
 type export struct {
 	Entries      map[string]*exportedImage
-	Repositories map[string]*TagInfo
+	Repositories map[string]*tagInfo
 	fileToLayers map[string][]fileLoc
 	layerToFiles map[string]map[string]bool
 	start        *exportedImage
@@ -39,7 +38,7 @@ type whiteoutFile struct {
 func newExport() *export {
 	return &export{
 		Entries:      map[string]*exportedImage{},
-		Repositories: map[string]*TagInfo{},
+		Repositories: map[string]*tagInfo{},
 		fileToLayers: map[string][]fileLoc{},
 		layerToFiles: map[string]map[string]bool{},
 		whiteouts:    []whiteoutFile{},
@@ -66,7 +65,7 @@ func (e *export) firstLayer(pattern string) *exportedImage {
 		if strings.Contains(cmd, pattern) {
 			break
 		}
-		root = e.ChildOf(root.LayerConfig.Id)
+		root = e.ChildOf(root.LayerConfig.ID)
 	}
 	return root
 }
@@ -87,10 +86,10 @@ func (e *export) Root() *exportedImage {
 func (e *export) LastChild() *exportedImage {
 	c := e.Root()
 	for {
-		if e.ChildOf(c.LayerConfig.Id) == nil {
+		if e.ChildOf(c.LayerConfig.ID) == nil {
 			break
 		}
-		c = e.ChildOf(c.LayerConfig.Id)
+		c = e.ChildOf(c.LayerConfig.ID)
 	}
 	return c
 }
@@ -107,7 +106,7 @@ func (e *export) ChildOf(parent string) *exportedImage {
 
 // GetById returns an exportedImaged with a prefix matching ID.  An error
 // is returned multiple exportedImages matched.
-func (e *export) GetById(idPrefix string) (*exportedImage, error) {
+func (e *export) GetByID(idPrefix string) (*exportedImage, error) {
 	matches := []*exportedImage{}
 	for id, entry := range e.Entries {
 		if strings.HasPrefix(id, idPrefix) {
@@ -116,7 +115,7 @@ func (e *export) GetById(idPrefix string) (*exportedImage, error) {
 	}
 
 	if len(matches) > 1 {
-		return nil, errors.New(fmt.Sprintf("%s is ambiguous. %d matched.", idPrefix, len(matches)))
+		return nil, fmt.Errorf("%s is ambiguous - %d matched", idPrefix, len(matches))
 	}
 
 	if len(matches) == 0 {
@@ -150,25 +149,25 @@ func (e *export) InsertLayer(parent string) (*exportedImage, error) {
 	return entry, err
 }
 
-func (e *export) ReplaceLayer(oldId string) (*exportedImage, error) {
+func (e *export) ReplaceLayer(oldID string) (*exportedImage, error) {
 
 	id, err := newID()
 	if err != nil {
 		return nil, err
 	}
 
-	orig := e.Entries[oldId]
-	child := e.ChildOf(oldId)
+	orig := e.Entries[oldID]
+	child := e.ChildOf(oldID)
 
 	cmd := strings.Join(orig.LayerConfig.ContainerConfig().Cmd, " ")
 
-	debugf("  -  Replacing %s w/ new layer %s (%s)\n", oldId[:12], id[:12], cmd)
+	debugf("  -  Replacing %s w/ new layer %s (%s)\n", oldID[:12], id[:12], cmd)
 	if child != nil {
 		child.LayerConfig.Parent = id
 	}
 
 	layerConfig := orig.LayerConfig
-	layerConfig.Id = id
+	layerConfig.ID = id
 
 	entry := &exportedImage{
 		LayerConfig: layerConfig,
@@ -178,7 +177,7 @@ func (e *export) ReplaceLayer(oldId string) (*exportedImage, error) {
 	e.Entries[id] = entry
 
 	orig.LayerTarBuffer.Reset()
-	delete(e.Entries, oldId)
+	delete(e.Entries, oldID)
 
 	return entry, nil
 }
@@ -233,7 +232,7 @@ func (e *export) parseLayerMetadata(instream io.Reader) error {
 
 		switch fileName {
 		case "json":
-			e.Entries[uuidPart].JsonHeader = header
+			e.Entries[uuidPart].JSONHeader = header
 			if err = json.NewDecoder(tarReader).Decode(&e.Entries[uuidPart].LayerConfig); err != nil {
 				return err
 			}
@@ -283,9 +282,9 @@ func (e *export) parseLayerMetadata(instream io.Reader) error {
 	current := e.start
 	orderMap := map[string]int{}
 	for {
-		orderMap[current.LayerConfig.Id] = index
+		orderMap[current.LayerConfig.ID] = index
 		index++
-		current = e.ChildOf(current.LayerConfig.Id)
+		current = e.ChildOf(current.LayerConfig.ID)
 		if current == nil {
 			break
 		}
@@ -369,14 +368,14 @@ func (e *export) SquashLayers(into, from *exportedImage, instream io.Reader, out
 		}
 	}
 
-	debugf("Squashing from %s into %s\n", from.LayerConfig.Id[:12], into.LayerConfig.Id[:12])
+	debugf("Squashing from %s into %s\n", from.LayerConfig.ID[:12], into.LayerConfig.ID[:12])
 
 	if err := squashLayerTarWriter.Close(); err != nil {
 		return "", err
 	}
 
 	var tw = tar.NewWriter(outstream)
-	var latestDirHeader, latestVersionHeader, latestJsonHeader, latestTarHeader *tar.Header
+	var latestDirHeader, latestVersionHeader, latestJSONHeader, latestTarHeader *tar.Header
 
 	debug("  -  Rewriting child history")
 	if err := e.rewriteChildren(into); err != nil {
@@ -389,7 +388,7 @@ func (e *export) SquashLayers(into, from *exportedImage, instream io.Reader, out
 	order := []*exportedImage{} // TODO: optimize, remove this
 	for {
 		order = append(order, current)
-		current = e.ChildOf(current.LayerConfig.Id)
+		current = e.ChildOf(current.LayerConfig.ID)
 		if current == nil {
 			break
 		}
@@ -405,7 +404,7 @@ func (e *export) SquashLayers(into, from *exportedImage, instream io.Reader, out
 		if dir == nil {
 			dir = latestDirHeader
 		}
-		dir.Name = current.LayerConfig.Id + "/"
+		dir.Name = current.LayerConfig.ID + "/"
 		if err := tw.WriteHeader(dir); err != nil {
 			return "", err
 		}
@@ -417,7 +416,7 @@ func (e *export) SquashLayers(into, from *exportedImage, instream io.Reader, out
 		if version == nil {
 			version = latestVersionHeader
 		}
-		version.Name = current.LayerConfig.Id + "/VERSION"
+		version.Name = current.LayerConfig.ID + "/VERSION"
 		if err := tw.WriteHeader(version); err != nil {
 			return "", err
 		}
@@ -425,18 +424,18 @@ func (e *export) SquashLayers(into, from *exportedImage, instream io.Reader, out
 			return "", err
 		}
 
-		var jsonHdr = current.JsonHeader
-		if latestJsonHeader == nil {
-			latestJsonHeader = jsonHdr
+		var jsonHdr = current.JSONHeader
+		if latestJSONHeader == nil {
+			latestJSONHeader = jsonHdr
 		}
 		if jsonHdr == nil {
-			jsonHdr = latestJsonHeader
+			jsonHdr = latestJSONHeader
 		}
-		jsonHdr.Name = current.LayerConfig.Id + "/json"
+		jsonHdr.Name = current.LayerConfig.ID + "/json"
 
 		var jsonBytes []byte
 		var err error
-		if current.LayerConfig.Id == into.LayerConfig.Id {
+		if current.LayerConfig.ID == into.LayerConfig.ID {
 			jsonBytes, err = json.Marshal(squashedLayerConfig)
 		} else {
 			jsonBytes, err = json.Marshal(current.LayerConfig)
@@ -459,7 +458,7 @@ func (e *export) SquashLayers(into, from *exportedImage, instream io.Reader, out
 		if layerTar == nil {
 			layerTar = latestTarHeader
 		}
-		layerTar.Name = current.LayerConfig.Id + "/layer.tar"
+		layerTar.Name = current.LayerConfig.ID + "/layer.tar"
 		layerTar.Size = int64(current.LayerTarBuffer.Len())
 
 		var empty bool
@@ -478,7 +477,7 @@ func (e *export) SquashLayers(into, from *exportedImage, instream io.Reader, out
 		}
 
 		if index == len(order)-1 {
-			retID = current.LayerConfig.Id
+			retID = current.LayerConfig.ID
 		}
 	}
 
@@ -492,7 +491,7 @@ func (e *export) SquashLayers(into, from *exportedImage, instream io.Reader, out
 func (e *export) rewriteChildren(from *exportedImage) error {
 	var entry = from
 
-	squashId := entry.LayerConfig.Id
+	squashID := entry.LayerConfig.ID
 	for {
 		if entry == nil {
 			break
@@ -503,8 +502,8 @@ func (e *export) rewriteChildren(from *exportedImage) error {
 			cmd = cmd[:60]
 		}
 
-		if entry.LayerConfig.Id == squashId || strings.Contains(cmd, "#(squash)") {
-			entry = e.ChildOf(entry.LayerConfig.Id)
+		if entry.LayerConfig.ID == squashID || strings.Contains(cmd, "#(squash)") {
+			entry = e.ChildOf(entry.LayerConfig.ID)
 			continue
 		}
 
@@ -512,35 +511,35 @@ func (e *export) rewriteChildren(from *exportedImage) error {
 		// else: remove the stuff in the layer.tar
 		if strings.Contains(cmd, "#(nop)") && !strings.Contains(cmd, "ADD") {
 			entry.LayerConfig.Created = time.Now().UTC()
-			oldID := entry.LayerConfig.Id
+			oldID := entry.LayerConfig.ID
 			newID, err := newID()
 			if err != nil {
 				return err
 			}
 
-			debugf("  -  Rejiggering %s. New ID %s. (%s)\n", entry.LayerConfig.Id[:12], newID[:12], cmd)
+			debugf("  -  Rejiggering %s. New ID %s. (%s)\n", entry.LayerConfig.ID[:12], newID[:12], cmd)
 
-			child := e.ChildOf(entry.LayerConfig.Id)
+			child := e.ChildOf(entry.LayerConfig.ID)
 			if child != nil {
-				childID := child.LayerConfig.Id
+				childID := child.LayerConfig.ID
 				e.Entries[childID].LayerConfig.Parent = newID // assign new id to Parent field of child
 			}
 
-			entry.LayerConfig.Id = newID
+			entry.LayerConfig.ID = newID
 
 			e.Entries[newID] = entry // add new layer to list
 			delete(e.Entries, oldID) // delete old layer from list
 
 			entry = child
 		} else {
-			debugf("  -  Removing %s. Squashed. (%s)\n", entry.LayerConfig.Id[:12], cmd)
+			debugf("  -  Removing %s. Squashed. (%s)\n", entry.LayerConfig.ID[:12], cmd)
 
-			child := e.ChildOf(entry.LayerConfig.Id)
+			child := e.ChildOf(entry.LayerConfig.ID)
 			if child != nil {
-				e.Entries[child.LayerConfig.Id].LayerConfig.Parent = entry.LayerConfig.Parent
+				e.Entries[child.LayerConfig.ID].LayerConfig.Parent = entry.LayerConfig.Parent
 			}
 			entry.LayerTarBuffer.Reset()
-			delete(e.Entries, entry.LayerConfig.Id)
+			delete(e.Entries, entry.LayerConfig.ID)
 			entry = child
 		}
 	}

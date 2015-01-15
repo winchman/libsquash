@@ -5,13 +5,13 @@ import (
 	"time"
 )
 
-type ContainerConfig struct {
+type containerConfig struct {
 	AttachStderr    bool
 	AttachStdin     bool
 	AttachStdout    bool
 	Cmd             []string
-	CpuShares       int64
-	Dns             []string
+	CPUShares       int64    `json:"CpuShares"`
+	DNS             []string `json:"Dns"`
 	Domainname      string
 	Entrypoint      []string
 	Env             []string
@@ -30,13 +30,13 @@ type ContainerConfig struct {
 	VolumesFrom     string
 }
 
-type Config struct {
+type config struct {
 	AttachStderr    bool
 	AttachStdin     bool
 	AttachStdout    bool
 	Cmd             []string
-	CpuShares       int64
-	Dns             []string // For Docker API v1.9 and below only
+	CPUShares       int64    `json:"CpuShares"`
+	DNS             []string `json:"Dns"` // For Docker API v1.9 and below only
 	Domainname      string
 	Entrypoint      []string
 	Env             []string
@@ -57,20 +57,20 @@ type Config struct {
 	WorkingDir      string
 }
 
-type LayerConfig struct {
-	Id                string           `json:"id"`
+type layerConfig struct {
+	ID                string           `json:"id"`
 	Parent            string           `json:"parent,omitempty"`
 	Comment           string           `json:"comment"`
 	Created           time.Time        `json:"created"`
-	V1ContainerConfig *ContainerConfig `json:"ContainerConfig,omitempty"`  // Docker 1.0.0, 1.0.1
-	V2ContainerConfig *ContainerConfig `json:"container_config,omitempty"` // All other versions
+	V1ContainerConfig *containerConfig `json:"ContainerConfig,omitempty"`  // Docker 1.0.0, 1.0.1
+	V2ContainerConfig *containerConfig `json:"container_config,omitempty"` // All other versions
 	Container         string           `json:"container"`
-	Config            *Config          `json:"config,omitempty"`
+	Config            *config          `json:"config,omitempty"`
 	DockerVersion     string           `json:"docker_version"`
 	Architecture      string           `json:"architecture"`
 }
 
-func (l *LayerConfig) ContainerConfig() *ContainerConfig {
+func (l *layerConfig) ContainerConfig() *containerConfig {
 	if l.V2ContainerConfig != nil {
 		return l.V2ContainerConfig
 	}
@@ -83,11 +83,12 @@ func (l *LayerConfig) ContainerConfig() *ContainerConfig {
 		return l.V2ContainerConfig
 	}
 
-	l.V2ContainerConfig = &ContainerConfig{}
+	l.V2ContainerConfig = &containerConfig{}
 
 	return l.V2ContainerConfig
 }
 
+// Port is a type for representing docker port mappings
 type Port string
 
 // Port returns the number of the port.

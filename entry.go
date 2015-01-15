@@ -7,17 +7,17 @@ import (
 )
 
 type exportedImage struct {
-	LayerConfig    *LayerConfig
+	LayerConfig    *layerConfig
 	LayerTarBuffer bytes.Buffer
 	DirHeader      *tar.Header
 	VersionHeader  *tar.Header
-	JsonHeader     *tar.Header
+	JSONHeader     *tar.Header
 	LayerTarHeader *tar.Header
 }
 
-func newLayerConfig(id, parent, comment string) *LayerConfig {
-	return &LayerConfig{
-		Id:            id,
+func newLayerConfig(id, parent, comment string) *layerConfig {
+	return &layerConfig{
+		ID:            id,
 		Parent:        parent,
 		Comment:       comment,
 		Created:       time.Now().UTC(),
