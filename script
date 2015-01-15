@@ -1,0 +1,114 @@
+#!/bin/bash
+
+readonly SUBCOMMAND_PREFIX="subcommand"
+readonly DESCRIPTION_PREFIX="desc"
+readonly HELP_PREFIX="help"
+
+function _main() {
+  readonly SUBCOMMAND="$(echo "$1" | tr "-" "_")"
+
+  if [[ -z "$SUBCOMMAND" ]] ; then
+    _usage
+    exit
+  fi
+
+  if ! type "${SUBCOMMAND_PREFIX}_${SUBCOMMAND}" &>/dev/null ; then
+    _usage
+    exit 1
+  fi
+
+  shift
+  eval "${SUBCOMMAND_PREFIX}_${SUBCOMMAND} $@"
+  exit $!
+}
+
+function _usage() {
+  cat <<USAGE >&2
+
+  ./script - one script to rule them all
+
+subcommands:
+
+$(_subcommands)
+
+USAGE
+}
+
+
+function _subcommands() {
+ for cmd in $(_cmd_list) ; do
+   printf "  $cmd" | tr "_" "-"
+   if type "${DESCRIPTION_PREFIX}_${cmd}" &>/dev/null ; then
+     printf " $("${DESCRIPTION_PREFIX}_${cmd}")"
+   fi
+   echo
+ done
+}
+
+function _cmd_list() {
+  compgen -A function | \
+    grep -vE "^_.*" | \
+    grep "${SUBCOMMAND_PREFIX}" | \
+    awk "/^${SUBCOMMAND_PREFIX}_\./{print;next}{sub(/^${SUBCOMMAND_PREFIX}_/,\"\",\$1);print}"
+}
+
+# help
+function desc_help() { echo "<subcommand> \t- print help text for subcommand" ; }
+function subcommand_help() {
+  local subcommand="$(echo "$1" | tr "-" "_")"
+  if type "${HELP_PREFIX}_${subcommand}" &>/dev/null ; then
+    eval "${HELP_PREFIX}_${subcommand}"
+  else
+    echo "no help text available for subcommand \"$subcommand\""
+  fi
+}
+
+# -h
+function desc__h() { echo "\t\t\t- display this message and exit" ; }
+function help__h() { cat <<HELP
+This is example help text for the "-h/--help" commands.
+HELP
+}
+function subcommand__h() {
+  _usage
+}
+
+# --help
+function desc___help() { echo "\t\t- display this message and exit" ; }
+function help___help() { help__h ; }
+function subcommand___help() { subcommand__h ; }
+
+function desc_get() { echo "\t\t\t- download all dependencies" ; }
+function help_get() { cat <<HELP
+
+Downloads all dependencies via \`go get\`. Example args might include '-u -d -t'
+
+Help text for \`go help get\`:
+
+$(go help get 2>&1 | awk '{ print "  " $0}')
+HELP
+}
+function subcommand_get() {
+  go get "$@" ./...
+}
+
+function desc_install() { echo "\t\t- go install this library" ; }
+function subcommand_install() {
+  go install "$@" ./...
+}
+
+function desc_fmtpolice() { echo "\t\t- validate formatting using gofmt and golint" ; }
+function help_fmtpolice() { cat <<HELP
+
+Validate formatting using gofmt and golint.  Will download the fmpolice file to ./fmtpolice
+if not already present, so please add "fmtpolice" to your \`.gitignore\`
+HELP
+}
+function subcommand_fmtpolice() {
+  if [[ ! -s fmtpolice ]] ; then
+    curl -sLOf https://raw.githubusercontent.com/rafecolton/fmtpolice/master/fmtpolice
+  fi
+  bash fmtpolice
+}
+
+_main "$@" # this line must always be last
