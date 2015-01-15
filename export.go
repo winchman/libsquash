@@ -465,8 +465,26 @@ func (e *export) SquashLayers(into, from *exportedImage, instream io.Reader, out
 		}
 		layerTar.Name = current.LayerConfig.Id + "/layer.tar"
 		layerTar.Size = int64(current.LayerTarBuffer.Len())
+
+		var empty bool
+
+		if layerTar.Size == 0 {
+			layerTar.Size = 1024
+			empty = true
+		}
+
 		tw.WriteHeader(layerTar)
-		tw.Write(current.LayerTarBuffer.Bytes())
+
+		if empty {
+			tw.Write(bytes.Repeat([]byte("\x00"), 1024))
+		} else {
+			tw.Write(current.LayerTarBuffer.Bytes())
+		}
+
+		if index == len(order)-1 {
+			retID = current.LayerConfig.Id
+		}
+	}
 	}
 
 	return tw.Close()
@@ -482,6 +500,9 @@ func (e *export) rewriteChildren(from *exportedImage) error {
 		}
 
 		cmd := strings.Join(entry.LayerConfig.ContainerConfig().Cmd, " ")
+		if len(cmd) > 60 {
+			cmd = cmd[:60]
+		}
 
 		if entry.LayerConfig.Id == squashId || strings.Contains(cmd, "#(squash)") {
 			entry = e.ChildOf(entry.LayerConfig.Id)
@@ -492,13 +513,32 @@ func (e *export) rewriteChildren(from *exportedImage) error {
 		// else: remove the stuff in the layer.tar
 		if strings.Contains(cmd, "#(nop)") && !strings.Contains(cmd, "ADD") {
 			entry.LayerConfig.Created = time.Now().UTC()
-			entry = e.ChildOf(entry.LayerConfig.Id)
+			oldID := entry.LayerConfig.Id
+			newID, err := newID()
+			if err != nil {
+				return err
+			}
+
+			debugf("  -  Rejiggering %s. New ID %s. (%s)\n", entry.LayerConfig.Id[:12], newID[:12], cmd)
+
+			child := e.ChildOf(entry.LayerConfig.Id)
+			if child != nil {
+				childID := child.LayerConfig.Id
+				e.Entries[childID].LayerConfig.Parent = newID // assign new id to Parent field of child
+			}
+
+			entry.LayerConfig.Id = newID
+
+			e.Entries[newID] = entry // add new layer to list
+			delete(e.Entries, oldID) // delete old layer from list
+
+			entry = child
 		} else {
 			debugf("  -  Removing %s. Squashed. (%s)\n", entry.LayerConfig.Id[:12], cmd)
 
 			child := e.ChildOf(entry.LayerConfig.Id)
 			if child != nil {
-				child.LayerConfig.Parent = entry.LayerConfig.Parent
+				e.Entries[child.LayerConfig.Id].LayerConfig.Parent = entry.LayerConfig.Parent
 			}
 			entry.LayerTarBuffer.Reset()
 			delete(e.Entries, entry.LayerConfig.Id)
