@@ -384,7 +384,7 @@ func (e *export) SquashLayers(into, from *exportedImage, instream io.Reader, out
 
 	squashedLayerConfig := into.LayerConfig
 
-	current := from
+	current := e.Root()
 	order := []*exportedImage{} // TODO: optimize, remove this
 	for {
 		order = append(order, current)
