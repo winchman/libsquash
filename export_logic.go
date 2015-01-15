@@ -4,185 +4,16 @@ import (
 	"archive/tar"
 	"bytes"
 	"encoding/json"
-	"fmt"
 	"io"
 	"io/ioutil"
 	"os"
 	"regexp"
 	"strings"
-	"time"
 )
 
 var uuidRegex = regexp.MustCompile("^[a-f0-9]{64}$")
 
-type tagInfo map[string]string
-
-type export struct {
-	Entries      map[string]*exportedImage
-	Repositories map[string]*tagInfo
-	fileToLayers map[string][]fileLoc
-	layerToFiles map[string]map[string]bool
-	start        *exportedImage
-	whiteouts    []whiteoutFile
-}
-
-type fileLoc struct {
-	uuid     string
-	whiteout bool // to indicate that the file as presented in this layer is a whiteout instead of a regular file
-}
-
-type whiteoutFile struct {
-	uuid   string // the layer in which the whiteout was found
-	prefix string // the file name prefix (without the ".wh." part)
-}
-
-func newExport() *export {
-	return &export{
-		Entries:      map[string]*exportedImage{},
-		Repositories: map[string]*tagInfo{},
-		fileToLayers: map[string][]fileLoc{},
-		layerToFiles: map[string]map[string]bool{},
-		whiteouts:    []whiteoutFile{},
-	}
-}
-
-func (e *export) matchesWhiteout(filename string) (uuidContainingWhiteout string, matches bool) {
-	for _, whiteout := range e.whiteouts {
-		if strings.HasPrefix(filename, whiteout.prefix) {
-			return whiteout.uuid, true
-		}
-	}
-	return "", false
-}
-
-func (e *export) firstLayer(pattern string) *exportedImage {
-	root := e.Root()
-	for {
-		if root == nil {
-			break
-		}
-
-		cmd := strings.Join(root.LayerConfig.ContainerConfig().Cmd, " ")
-		if strings.Contains(cmd, pattern) {
-			break
-		}
-		root = e.ChildOf(root.LayerConfig.ID)
-	}
-	return root
-}
-
-func (e *export) FirstFrom() *exportedImage {
-	return e.firstLayer("#(nop) ADD file")
-}
-
-func (e *export) FirstSquash() *exportedImage {
-	return e.firstLayer("#(squash)")
-}
-
-// Root returns the top layer in the export
-func (e *export) Root() *exportedImage {
-	return e.ChildOf("")
-}
-
-func (e *export) LastChild() *exportedImage {
-	c := e.Root()
-	for {
-		if e.ChildOf(c.LayerConfig.ID) == nil {
-			break
-		}
-		c = e.ChildOf(c.LayerConfig.ID)
-	}
-	return c
-}
-
-// ChildOf returns the child layer or nil of the parent
-func (e *export) ChildOf(parent string) *exportedImage {
-	for _, entry := range e.Entries {
-		if entry.LayerConfig.Parent == parent {
-			return entry
-		}
-	}
-	return nil
-}
-
-// GetById returns an exportedImaged with a prefix matching ID.  An error
-// is returned multiple exportedImages matched.
-func (e *export) GetByID(idPrefix string) (*exportedImage, error) {
-	matches := []*exportedImage{}
-	for id, entry := range e.Entries {
-		if strings.HasPrefix(id, idPrefix) {
-			matches = append(matches, entry)
-		}
-	}
-
-	if len(matches) > 1 {
-		return nil, fmt.Errorf("%s is ambiguous - %d matched", idPrefix, len(matches))
-	}
-
-	if len(matches) == 0 {
-		return nil, nil
-	}
-
-	return matches[0], nil
-}
-
-func (e *export) InsertLayer(parent string) (*exportedImage, error) {
-	id, err := newID()
-	if err != nil {
-		return nil, err
-	}
-
-	layerConfig := newLayerConfig(id, parent, "squashed w/ docker-squash")
-	layerConfig.ContainerConfig().Cmd = []string{"/bin/sh", "-c", fmt.Sprintf("#(squash) from %s", parent[:12])}
-
-	entry := &exportedImage{
-		LayerConfig: layerConfig,
-	}
-
-	entry.LayerConfig.Created = time.Now().UTC()
-
-	// rewrite child json
-	child := e.ChildOf(parent)
-	child.LayerConfig.Parent = id
-
-	e.Entries[id] = entry
-
-	return entry, err
-}
-
-func (e *export) ReplaceLayer(oldID string) (*exportedImage, error) {
-
-	id, err := newID()
-	if err != nil {
-		return nil, err
-	}
-
-	orig := e.Entries[oldID]
-	child := e.ChildOf(oldID)
-
-	cmd := strings.Join(orig.LayerConfig.ContainerConfig().Cmd, " ")
-
-	debugf("  -  Replacing %s w/ new layer %s (%s)\n", oldID[:12], id[:12], cmd)
-	if child != nil {
-		child.LayerConfig.Parent = id
-	}
-
-	layerConfig := orig.LayerConfig
-	layerConfig.ID = id
-
-	entry := &exportedImage{
-		LayerConfig: layerConfig,
-	}
-	entry.LayerConfig.Created = time.Now().UTC()
-
-	e.Entries[id] = entry
-
-	delete(e.Entries, oldID)
-
-	return entry, nil
-}
-
-func (e *export) parseLayerMetadata(instream io.Reader) error {
+func (e *export) IngestImageMetadata(instream io.Reader) error {
 	var tarReader = tar.NewReader(instream)
 	for {
 		header, err := tarReader.Next()
@@ -226,14 +57,14 @@ func (e *export) parseLayerMetadata(instream io.Reader) error {
 
 		uuidPart := nameParts[0]
 		fileName := nameParts[1]
-		if e.Entries[uuidPart] == nil {
-			e.Entries[uuidPart] = &exportedImage{}
+		if e.Layers[uuidPart] == nil {
+			e.Layers[uuidPart] = &layer{}
 		}
 
 		switch fileName {
 		case "json":
-			e.Entries[uuidPart].JSONHeader = header
-			if err = json.NewDecoder(tarReader).Decode(&e.Entries[uuidPart].LayerConfig); err != nil {
+			e.Layers[uuidPart].JSONHeader = header
+			if err = json.NewDecoder(tarReader).Decode(&e.Layers[uuidPart].LayerConfig); err != nil {
 				return err
 			}
 		case "layer.tar":
@@ -301,10 +132,10 @@ func (e *export) parseLayerMetadata(instream io.Reader) error {
 			if e.layerToFiles[greatest.uuid] == nil {
 				e.layerToFiles[greatest.uuid] = map[string]bool{}
 			}
-			/*
-				if name matches whiteout prefix and the whiteout file is found in a layer that is >= greatest.uuid, skip
-			*/
-			uuidContainingWhiteout, matches := e.matchesWhiteout(path)
+
+			// if name matches whiteout prefix and the whiteout file is found
+			// in a layer that is >= greatest.uuid, skip
+			uuidContainingWhiteout, matches := matchesWhiteout(path, e.whiteouts)
 			if (matches && orderMap[uuidContainingWhiteout] >= orderMap[greatest.uuid]) || greatest.whiteout {
 				delete(e.layerToFiles[greatest.uuid], path)
 			} else {
@@ -316,7 +147,7 @@ func (e *export) parseLayerMetadata(instream io.Reader) error {
 	return nil
 }
 
-func (e *export) SquashLayers(into, from *exportedImage, instream io.Reader, outstream io.Writer) (imageID string, err error) {
+func (e *export) SquashLayers(into, from *layer, instream io.Reader, outstream io.Writer) (imageID string, err error) {
 	tempfile, err := ioutil.TempFile("", "libsquash")
 	if err != nil {
 		return "", err
@@ -353,9 +184,9 @@ func (e *export) SquashLayers(into, from *exportedImage, instream io.Reader, out
 
 		switch fileName {
 		case "":
-			e.Entries[uuidPart].DirHeader = header
+			e.Layers[uuidPart].DirHeader = header
 		case "layer.tar":
-			e.Entries[uuidPart].LayerTarHeader = header
+			e.Layers[uuidPart].LayerTarHeader = header
 			layerReader := tar.NewReader(tarReader)
 			for {
 				fileHeader, err := layerReader.Next()
@@ -374,7 +205,7 @@ func (e *export) SquashLayers(into, from *exportedImage, instream io.Reader, out
 				}
 			}
 		case "VERSION":
-			e.Entries[uuidPart].VersionHeader = header
+			e.Layers[uuidPart].VersionHeader = header
 		}
 	}
 
@@ -399,7 +230,7 @@ func (e *export) SquashLayers(into, from *exportedImage, instream io.Reader, out
 	squashedLayerConfig := into.LayerConfig
 
 	current := e.Root()
-	order := []*exportedImage{} // TODO: optimize, remove this
+	order := []*layer{} // TODO: optimize, remove this
 	for {
 		order = append(order, current)
 		current = e.ChildOf(current.LayerConfig.ID)
@@ -503,7 +334,7 @@ func (e *export) SquashLayers(into, from *exportedImage, instream io.Reader, out
 	return retID, nil
 }
 
-func (e *export) rewriteChildren(from *exportedImage) error {
+func (e *export) rewriteChildren(from *layer) error {
 	var entry = from
 
 	squashID := entry.LayerConfig.ID
@@ -512,50 +343,24 @@ func (e *export) rewriteChildren(from *exportedImage) error {
 			break
 		}
 
-		cmd := strings.Join(entry.LayerConfig.ContainerConfig().Cmd, " ")
-		if len(cmd) > 60 {
-			cmd = cmd[:60]
+		child := e.ChildOf(entry.LayerConfig.ID)
+
+		/*
+			if the layer is not the squash layer
+				if: we have a #(nop) that is not an ADD, skip it
+				else: remove the stuff in the layer.tar
+		*/
+		if entry.LayerConfig.ID != squashID && !strings.Contains(entry.Cmd(), "#(squash)") {
+			if strings.Contains(entry.Cmd(), "#(nop)") && !strings.Contains(entry.Cmd(), "ADD") {
+				if err := e.ReplaceLayer(entry); err != nil {
+					return err
+				}
+			} else {
+				e.RemoveLayer(entry)
+			}
 		}
 
-		if entry.LayerConfig.ID == squashID || strings.Contains(cmd, "#(squash)") {
-			entry = e.ChildOf(entry.LayerConfig.ID)
-			continue
-		}
-
-		// if: we have a #(nop) that is not an ADD, skip it
-		// else: remove the stuff in the layer.tar
-		if strings.Contains(cmd, "#(nop)") && !strings.Contains(cmd, "ADD") {
-			entry.LayerConfig.Created = time.Now().UTC()
-			oldID := entry.LayerConfig.ID
-			newID, err := newID()
-			if err != nil {
-				return err
-			}
-
-			debugf("  -  Rejiggering %s. New ID %s. (%s)\n", entry.LayerConfig.ID[:12], newID[:12], cmd)
-
-			child := e.ChildOf(entry.LayerConfig.ID)
-			if child != nil {
-				childID := child.LayerConfig.ID
-				e.Entries[childID].LayerConfig.Parent = newID // assign new id to Parent field of child
-			}
-
-			entry.LayerConfig.ID = newID
-
-			e.Entries[newID] = entry // add new layer to list
-			delete(e.Entries, oldID) // delete old layer from list
-
-			entry = child
-		} else {
-			debugf("  -  Removing %s. Squashed. (%s)\n", entry.LayerConfig.ID[:12], cmd)
-
-			child := e.ChildOf(entry.LayerConfig.ID)
-			if child != nil {
-				e.Entries[child.LayerConfig.ID].LayerConfig.Parent = entry.LayerConfig.Parent
-			}
-			delete(e.Entries, entry.LayerConfig.ID)
-			entry = child
-		}
+		entry = child
 	}
 	return nil
 }

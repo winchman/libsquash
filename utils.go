@@ -65,3 +65,12 @@ func isWhiteout(filepath string) bool {
 func nameWithoutWhiteoutPrefix(filepath string) string {
 	return strings.Replace(filepath, ".wh.", "", -1)
 }
+
+func matchesWhiteout(filename string, whiteouts []whiteoutFile) (uuidContainingWhiteout string, matches bool) {
+	for _, whiteout := range whiteouts {
+		if strings.HasPrefix(filename, whiteout.prefix) {
+			return whiteout.uuid, true
+		}
+	}
+	return "", false
+}
