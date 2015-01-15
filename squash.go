@@ -15,7 +15,7 @@ var (
 	errorNoFROM = errors.New("no layer matching FROM")
 )
 
-func Squash(instream io.Reader, outstream io.Writer) error {
+func Squash(instream io.Reader, outstream io.Writer, imageIDOut io.Writer) error {
 	export := newExport()
 	tempfile, err := ioutil.TempFile("", "libsquash")
 	if err != nil {
@@ -50,7 +50,16 @@ func Squash(instream io.Reader, outstream io.Writer) error {
 	}
 
 	// squash all later layers into our new layer (from second stream)
-	return export.SquashLayers(newEntry, export.start, tempfile, outstream)
+	imageID, err := export.SquashLayers(newEntry, export.start, tempfile, outstream)
+	if err != nil {
+		return err
+	}
+
+	if _, err := imageIDOut.Write([]byte(imageID)); err != nil {
+		return err
+	}
+
+	return nil
 }
 
 func printVerbose(export *export, newEntryID string) {

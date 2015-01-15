@@ -2,6 +2,7 @@ package libsquash
 
 import (
 	"archive/tar"
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -316,7 +317,7 @@ func (e *export) parseLayerMetadata(instream io.Reader) error {
 	return nil
 }
 
-func (e *export) SquashLayers(into, from *exportedImage, instream io.Reader, outstream io.Writer) error {
+func (e *export) SquashLayers(into, from *exportedImage, instream io.Reader, outstream io.Writer) (imageID string, err error) {
 	var squashLayerTarWriter = tar.NewWriter(&into.LayerTarBuffer)
 
 	var tarReader = tar.NewReader(instream)
@@ -326,7 +327,7 @@ func (e *export) SquashLayers(into, from *exportedImage, instream io.Reader, out
 			if err == io.EOF {
 				break
 			}
-			return err
+			return "", err
 		}
 
 		if header.Name == "." || header.Name == ".." || header.Name == "./" {
@@ -353,13 +354,13 @@ func (e *export) SquashLayers(into, from *exportedImage, instream io.Reader, out
 					if err == io.EOF {
 						break
 					}
-					return err
+					return "", err
 				}
 				filePath := nameWithoutWhiteoutPrefix(fileHeader.Name)
 				if e.layerToFiles[uuidPart][filePath] {
 					squashLayerTarWriter.WriteHeader(fileHeader)
 					if _, err := io.Copy(squashLayerTarWriter, layerReader); err != nil {
-						return err
+						return "", err
 					}
 				}
 			}
@@ -371,7 +372,7 @@ func (e *export) SquashLayers(into, from *exportedImage, instream io.Reader, out
 	debugf("Squashing from %s into %s\n", from.LayerConfig.Id[:12], into.LayerConfig.Id[:12])
 
 	if err := squashLayerTarWriter.Close(); err != nil {
-		return err
+		return "", err
 	}
 
 	var tw = tar.NewWriter(outstream)
@@ -379,7 +380,7 @@ func (e *export) SquashLayers(into, from *exportedImage, instream io.Reader, out
 
 	debug("  -  Rewriting child history")
 	if err := e.rewriteChildren(into); err != nil {
-		return err
+		return "", err
 	}
 
 	squashedLayerConfig := into.LayerConfig
@@ -394,7 +395,9 @@ func (e *export) SquashLayers(into, from *exportedImage, instream io.Reader, out
 		}
 	}
 
-	for _, current := range order {
+	var retID string
+
+	for index, current := range order {
 		var dir = current.DirHeader
 		if latestDirHeader == nil {
 			latestDirHeader = dir
@@ -404,7 +407,7 @@ func (e *export) SquashLayers(into, from *exportedImage, instream io.Reader, out
 		}
 		dir.Name = current.LayerConfig.Id + "/"
 		if err := tw.WriteHeader(dir); err != nil {
-			return err
+			return "", err
 		}
 
 		var version = current.VersionHeader
@@ -416,10 +419,10 @@ func (e *export) SquashLayers(into, from *exportedImage, instream io.Reader, out
 		}
 		version.Name = current.LayerConfig.Id + "/VERSION"
 		if err := tw.WriteHeader(version); err != nil {
-			return err
+			return "", err
 		}
 		if _, err := tw.Write([]byte("1.0")); err != nil {
-			return err
+			return "", err
 		}
 
 		var jsonHdr = current.JsonHeader
@@ -439,14 +442,14 @@ func (e *export) SquashLayers(into, from *exportedImage, instream io.Reader, out
 			jsonBytes, err = json.Marshal(current.LayerConfig)
 		}
 		if err != nil {
-			return err
+			return "", err
 		}
 		jsonHdr.Size = int64(len(jsonBytes))
 		if err := tw.WriteHeader(jsonHdr); err != nil {
-			return err
+			return "", err
 		}
 		if _, err := tw.Write(jsonBytes); err != nil {
-			return err
+			return "", err
 		}
 
 		var layerTar = current.LayerTarHeader
@@ -478,9 +481,12 @@ func (e *export) SquashLayers(into, from *exportedImage, instream io.Reader, out
 			retID = current.LayerConfig.Id
 		}
 	}
+
+	if err := tw.Close(); err != nil {
+		return "", err
 	}
 
-	return tw.Close()
+	return retID, nil
 }
 
 func (e *export) rewriteChildren(from *exportedImage) error {
