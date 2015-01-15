@@ -383,10 +383,6 @@ func (e *export) SquashLayers(into, from *exportedImage, instream io.Reader, out
 	}
 
 	squashedLayerConfig := into.LayerConfig
-	last := e.LastChild().LayerConfig
-
-	squashedLayerConfig.V2ContainerConfig = augmentSquashed(squashedLayerConfig, last)
-	squashedLayerConfig.Config = augmentSquashedConfig(squashedLayerConfig, last)
 
 	current := from
 	order := []*exportedImage{} // TODO: optimize, remove this
