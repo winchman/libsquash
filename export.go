@@ -267,11 +267,8 @@ func (e *export) parseLayerMetadata(instream io.Reader) error {
 	}
 
 	e.start = e.FirstSquash()
-	// Can't find a previously squashed layer, use first ADD
-	if e.start == nil {
-		e.start = e.FirstFrom()
-	}
-	// Can't find a FROM, default to root
+
+	// Can't find a previously squashed layer, default to root
 	if e.start == nil {
 		e.start = e.Root()
 	}
