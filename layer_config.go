@@ -1,9 +1,32 @@
 package libsquash
 
 import (
-	"strings"
 	"time"
 )
+
+type layerConfig struct {
+	ID                string           `json:"id"`
+	Parent            string           `json:"parent,omitempty"`
+	Comment           string           `json:"comment"`
+	Created           time.Time        `json:"created"`
+	V1ContainerConfig *containerConfig `json:"ContainerConfig,omitempty"`  // Docker 1.0.0, 1.0.1
+	V2ContainerConfig *containerConfig `json:"container_config,omitempty"` // All other versions
+	Container         string           `json:"container"`
+	Config            *config          `json:"config,omitempty"`
+	DockerVersion     string           `json:"docker_version"`
+	Architecture      string           `json:"architecture"`
+}
+
+func newLayerConfig(id, parent, comment string) *layerConfig {
+	return &layerConfig{
+		ID:            id,
+		Parent:        parent,
+		Comment:       comment,
+		Created:       time.Now().UTC(),
+		DockerVersion: "0.1.2",
+		Architecture:  "x86_64",
+	}
+}
 
 type containerConfig struct {
 	AttachStderr    bool
@@ -57,19 +80,6 @@ type config struct {
 	WorkingDir      string
 }
 
-type layerConfig struct {
-	ID                string           `json:"id"`
-	Parent            string           `json:"parent,omitempty"`
-	Comment           string           `json:"comment"`
-	Created           time.Time        `json:"created"`
-	V1ContainerConfig *containerConfig `json:"ContainerConfig,omitempty"`  // Docker 1.0.0, 1.0.1
-	V2ContainerConfig *containerConfig `json:"container_config,omitempty"` // All other versions
-	Container         string           `json:"container"`
-	Config            *config          `json:"config,omitempty"`
-	DockerVersion     string           `json:"docker_version"`
-	Architecture      string           `json:"architecture"`
-}
-
 func (l *layerConfig) ContainerConfig() *containerConfig {
 	if l.V2ContainerConfig != nil {
 		return l.V2ContainerConfig
@@ -86,21 +96,4 @@ func (l *layerConfig) ContainerConfig() *containerConfig {
 	l.V2ContainerConfig = &containerConfig{}
 
 	return l.V2ContainerConfig
-}
-
-// Port is a type for representing docker port mappings
-type Port string
-
-// Port returns the number of the port.
-func (p Port) Port() string {
-	return strings.Split(string(p), "/")[0]
-}
-
-// Proto returns the name of the protocol.
-func (p Port) Proto() string {
-	parts := strings.Split(string(p), "/")
-	if len(parts) == 1 {
-		return "tcp"
-	}
-	return parts[1]
 }

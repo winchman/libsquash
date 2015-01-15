@@ -35,7 +35,7 @@ func Squash(instream io.Reader, outstream io.Writer, imageIDOut io.Writer) error
 	instreamTee := io.TeeReader(instream, tempfile)
 
 	// populate metadata from first stream
-	export.parseLayerMetadata(instreamTee)
+	export.IngestImageMetadata(instreamTee)
 
 	// rewind tempfile to the entire tar stream can be read back in
 	if _, err = tempfile.Seek(0, 0); err != nil {
