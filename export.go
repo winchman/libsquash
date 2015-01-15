@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"os"
 	"regexp"
 	"strings"
@@ -176,7 +177,6 @@ func (e *export) ReplaceLayer(oldID string) (*exportedImage, error) {
 
 	e.Entries[id] = entry
 
-	orig.LayerTarBuffer.Reset()
 	delete(e.Entries, oldID)
 
 	return entry, nil
@@ -317,7 +317,17 @@ func (e *export) parseLayerMetadata(instream io.Reader) error {
 }
 
 func (e *export) SquashLayers(into, from *exportedImage, instream io.Reader, outstream io.Writer) (imageID string, err error) {
-	var squashLayerTarWriter = tar.NewWriter(&into.LayerTarBuffer)
+	tempfile, err := ioutil.TempFile("", "libsquash")
+	if err != nil {
+		return "", err
+	}
+
+	defer func() {
+		_ = tempfile.Close()
+		_ = os.RemoveAll(tempfile.Name())
+	}()
+
+	var squashLayerTarWriter = tar.NewWriter(tempfile)
 
 	var tarReader = tar.NewReader(instream)
 	for {
@@ -371,6 +381,10 @@ func (e *export) SquashLayers(into, from *exportedImage, instream io.Reader, out
 	debugf("Squashing from %s into %s\n", from.LayerConfig.ID[:12], into.LayerConfig.ID[:12])
 
 	if err := squashLayerTarWriter.Close(); err != nil {
+		return "", err
+	}
+
+	if _, err = tempfile.Seek(0, 0); err != nil {
 		return "", err
 	}
 
@@ -458,22 +472,23 @@ func (e *export) SquashLayers(into, from *exportedImage, instream io.Reader, out
 		if layerTar == nil {
 			layerTar = latestTarHeader
 		}
+
 		layerTar.Name = current.LayerConfig.ID + "/layer.tar"
-		layerTar.Size = int64(current.LayerTarBuffer.Len())
 
-		var empty bool
-
-		if layerTar.Size == 0 {
-			layerTar.Size = 1024
-			empty = true
-		}
-
-		tw.WriteHeader(layerTar)
-
-		if empty {
-			tw.Write(bytes.Repeat([]byte("\x00"), 1024))
+		if current.LayerConfig.ID == into.LayerConfig.ID {
+			fi, err := tempfile.Stat()
+			if err != nil {
+				return "", err
+			}
+			layerTar.Size = fi.Size()
+			tw.WriteHeader(layerTar)
+			if _, err := io.Copy(tw, tempfile); err != nil {
+				return "", nil
+			}
 		} else {
-			tw.Write(current.LayerTarBuffer.Bytes())
+			layerTar.Size = 1024
+			tw.WriteHeader(layerTar)
+			tw.Write(bytes.Repeat([]byte("\x00"), 1024))
 		}
 
 		if index == len(order)-1 {
@@ -538,7 +553,6 @@ func (e *export) rewriteChildren(from *exportedImage) error {
 			if child != nil {
 				e.Entries[child.LayerConfig.ID].LayerConfig.Parent = entry.LayerConfig.Parent
 			}
-			entry.LayerTarBuffer.Reset()
 			delete(e.Entries, entry.LayerConfig.ID)
 			entry = child
 		}

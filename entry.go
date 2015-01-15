@@ -2,13 +2,11 @@ package libsquash
 
 import (
 	"archive/tar"
-	"bytes"
 	"time"
 )
 
 type exportedImage struct {
 	LayerConfig    *layerConfig
-	LayerTarBuffer bytes.Buffer
 	DirHeader      *tar.Header
 	VersionHeader  *tar.Header
 	JSONHeader     *tar.Header
