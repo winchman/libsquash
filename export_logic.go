@@ -9,92 +9,62 @@ import (
 	"os"
 	"regexp"
 	"strings"
+
+	"github.com/winchman/libsquash/tarball"
 )
 
+var nameRegex = regexp.MustCompile(`^\.$|^\.\.$|^\.\/$`)
 var uuidRegex = regexp.MustCompile("^[a-f0-9]{64}$")
 
-func (e *export) IngestImageMetadata(instream io.Reader) error {
-	var tarReader = tar.NewReader(instream)
-	for {
-		header, err := tarReader.Next()
-		if err != nil {
-			if err == io.EOF {
-				break
-			}
-			return err
+func (e *export) IngestImageMetadata(tarstream io.Reader) error {
+	if err := tarball.Walk(tarstream, func(t *tarball.TarFile) error {
+		if ignore(t) {
+			return nil
 		}
 
-		if header.Name == "." || header.Name == ".." || header.Name == "./" {
-			continue
+		uuid := nameFirst(t)
+		//file := nameSecond(t)
+
+		if e.Layers[uuid] == nil {
+			e.Layers[uuid] = &layer{}
 		}
 
-		nameParts := strings.Split(header.Name, string(os.PathSeparator))
-		if len(nameParts) == 0 {
-			continue
-		}
-
-		if len(nameParts) == 1 {
-			if nameParts[0] == "repositories" {
-				if err = json.NewDecoder(tarReader).Decode(&e.Repositories); err != nil {
-					return err
-				}
-			}
-
-			// Export may have multiple branches with the same parent.
-			// We can't handle that currently so abort.
-			for _, v := range e.Repositories {
-				commits := map[string]string{}
-				for tag, commit := range *v {
-					commits[commit] = tag
-				}
-				if len(commits) > 1 {
-					return errorMultipleBranchesSameParent
-				}
-			}
-
-			continue
-		}
-
-		uuidPart := nameParts[0]
-		fileName := nameParts[1]
-		if e.Layers[uuidPart] == nil {
-			e.Layers[uuidPart] = &layer{}
-		}
-
-		switch fileName {
-		case "json":
-			e.Layers[uuidPart].JSONHeader = header
-			if err = json.NewDecoder(tarReader).Decode(&e.Layers[uuidPart].LayerConfig); err != nil {
+		if repositories(t) {
+			if err := checkRepositories(e, t); err != nil {
 				return err
 			}
-		case "layer.tar":
-			layerReader := tar.NewReader(tarReader)
-			for {
-				fileHeader, err := layerReader.Next()
-				if err != nil {
-					if err == io.EOF {
-						break
-					}
-					return err
-				}
-				filePath := nameWithoutWhiteoutPrefix(fileHeader.Name)
+		} else if jsonFile(t) {
+			e.Layers[uuid].JSONHeader = t.Header
+			if err := json.NewDecoder(t.Stream).Decode(&e.Layers[uuid].LayerConfig); err != nil {
+				return err
+			}
+		} else if layerTar(t) {
+			if err := tarball.Walk(t.Stream, func(tf *tarball.TarFile) error {
+				filePath := nameWithoutWhiteoutPrefix(tf.Name())
 				if e.fileToLayers[filePath] == nil {
 					e.fileToLayers[filePath] = []fileLoc{}
 				}
-				foundWhiteout := isWhiteout(fileHeader.Name)
+				foundWhiteout := isWhiteout(tf.Name())
 				e.fileToLayers[filePath] = append(e.fileToLayers[filePath], fileLoc{
-					uuid:     uuidPart,
+					uuid:     uuid,
 					whiteout: foundWhiteout,
 				})
 
 				if foundWhiteout {
 					e.whiteouts = append(e.whiteouts, whiteoutFile{
 						prefix: filePath,
-						uuid:   uuidPart,
+						uuid:   uuid,
 					})
 				}
+				return nil
+			}); err != nil {
+				return err
 			}
 		}
+
+		return nil
+	}); err != nil {
+		return err
 	}
 
 	e.start = e.FirstSquash()
