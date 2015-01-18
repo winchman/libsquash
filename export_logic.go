@@ -24,7 +24,7 @@ func (e *export) IngestImageMetadata(tarstream io.Reader) error {
 			if err := json.NewDecoder(t.Stream).Decode(&e.Repositories); err != nil {
 				return err
 			}
-			// Export may have multiple branches with the same parent. Abort.
+			// Export may have multiple branches with the same parent; if so, abort.
 			for _, v := range e.Repositories {
 				commits := map[string]string{}
 				for tag, commit := range *v {
