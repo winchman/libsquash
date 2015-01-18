@@ -16,7 +16,7 @@ import (
 var uuidRegex = regexp.MustCompile("^[a-f0-9]{64}$")
 
 func (e *export) IngestImageMetadata(tarstream io.Reader) error {
-	err := tarball.Walk(tarstream, func(t *tarball.TarFile) error {
+	if err := tarball.Walk(tarstream, func(t *tarball.TarFile) error {
 		switch Type(t) {
 		case IGNORE:
 			return nil
@@ -48,7 +48,7 @@ func (e *export) IngestImageMetadata(tarstream io.Reader) error {
 			if e.Layers[uuid] == nil {
 				e.Layers[uuid] = &layer{}
 			}
-			err := tarball.Walk(t.Stream, func(tf *tarball.TarFile) error {
+			if err := tarball.Walk(t.Stream, func(tf *tarball.TarFile) error {
 				filePath := nameWithoutWhiteoutPrefix(tf.Name())
 				if e.fileToLayers[filePath] == nil {
 					e.fileToLayers[filePath] = []fileLoc{}
@@ -66,14 +66,12 @@ func (e *export) IngestImageMetadata(tarstream io.Reader) error {
 					})
 				}
 				return nil
-			})
-			if err != nil {
+			}); err != nil {
 				return err
 			}
 		}
 		return nil
-	})
-	if err != nil {
+	}); err != nil {
 		return err
 	}
 
@@ -131,7 +129,7 @@ func (e *export) populateFileData() error {
 	return nil
 }
 
-func (e *export) SquashLayers(into, from *layer, instream io.Reader, outstream io.Writer) (imageID string, err error) {
+func (e *export) SquashLayers(into, from *layer, tarstream io.Reader, outstream io.Writer) (imageID string, err error) {
 	tempfile, err := ioutil.TempFile("", "libsquash")
 	if err != nil {
 		return "", err
@@ -144,53 +142,34 @@ func (e *export) SquashLayers(into, from *layer, instream io.Reader, outstream i
 
 	var squashLayerTarWriter = tar.NewWriter(tempfile)
 
-	var tarReader = tar.NewReader(instream)
-	for {
-		header, err := tarReader.Next()
-		if err != nil {
-			if err == io.EOF {
-				break
-			}
-			return "", err
-		}
-
-		if header.Name == "." || header.Name == ".." || header.Name == "./" {
-			continue
-		}
-
-		nameParts := strings.Split(header.Name, string(os.PathSeparator))
-		if len(nameParts) == 0 {
-			continue
-		}
-
-		uuidPart := nameParts[0]
-		fileName := nameParts[1]
-
-		switch fileName {
-		case "":
-			e.Layers[uuidPart].DirHeader = header
-		case "layer.tar":
-			e.Layers[uuidPart].LayerTarHeader = header
-			layerReader := tar.NewReader(tarReader)
-			for {
-				fileHeader, err := layerReader.Next()
-				if err != nil {
-					if err == io.EOF {
-						break
-					}
-					return "", err
-				}
-				filePath := nameWithoutWhiteoutPrefix(fileHeader.Name)
+	if err = tarball.Walk(tarstream, func(t *tarball.TarFile) error {
+		nameParts := t.NameParts()
+		switch Type(t) {
+		case DIRECTORY:
+			uuidPart := nameParts[0]
+			e.Layers[uuidPart].DirHeader = t.Header
+		case LAYER_TAR:
+			uuidPart := nameParts[0]
+			e.Layers[uuidPart].LayerTarHeader = t.Header
+			if err := tarball.Walk(t.Stream, func(tf *tarball.TarFile) error {
+				filePath := nameWithoutWhiteoutPrefix(tf.Name())
 				if e.layerToFiles[uuidPart][filePath] {
-					squashLayerTarWriter.WriteHeader(fileHeader)
-					if _, err := io.Copy(squashLayerTarWriter, layerReader); err != nil {
-						return "", err
+					squashLayerTarWriter.WriteHeader(tf.Header)
+					if _, err := io.Copy(squashLayerTarWriter, tf.Stream); err != nil {
+						return err
 					}
 				}
+				return nil
+			}); err != nil {
+				return err
 			}
-		case "VERSION":
-			e.Layers[uuidPart].VersionHeader = header
+		case VERSION:
+			uuidPart := nameParts[0]
+			e.Layers[uuidPart].VersionHeader = t.Header
 		}
+		return nil
+	}); err != nil {
+		return "", err
 	}
 
 	debugf("Squashing from %s into %s\n", from.LayerConfig.ID[:12], into.LayerConfig.ID[:12])
