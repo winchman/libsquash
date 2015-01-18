@@ -140,7 +140,8 @@ func (e *export) SquashLayers(into, from *layer, tarstream io.Reader, outstream 
 		_ = os.RemoveAll(tempfile.Name())
 	}()
 
-	var squashLayerTarWriter = tar.NewWriter(tempfile)
+	//var squashLayerTarWriter = tar.NewWriter(tempfile)
+	var squashLayerTarWriter = tarball.NewTarstream(tempfile)
 
 	if err = tarball.Walk(tarstream, func(t *tarball.TarFile) error {
 		nameParts := t.NameParts()
@@ -154,8 +155,7 @@ func (e *export) SquashLayers(into, from *layer, tarstream io.Reader, outstream 
 			if err := tarball.Walk(t.Stream, func(tf *tarball.TarFile) error {
 				filePath := nameWithoutWhiteoutPrefix(tf.Name())
 				if e.layerToFiles[uuidPart][filePath] {
-					squashLayerTarWriter.WriteHeader(tf.Header)
-					if _, err := io.Copy(squashLayerTarWriter, tf.Stream); err != nil {
+					if err := squashLayerTarWriter.Add(&tarball.TarFile{Header: tf.Header, Stream: tf.Stream}); err != nil {
 						return err
 					}
 				}
@@ -187,7 +187,9 @@ func (e *export) SquashLayers(into, from *layer, tarstream io.Reader, outstream 
 		return "", err
 	}
 
-	var tw = tar.NewWriter(outstream)
+	//var tw = tar.NewWriter(outstream)
+	tw := tarball.NewTarstream(outstream)
+
 	var latestDirHeader, latestVersionHeader, latestJSONHeader, latestTarHeader *tar.Header
 
 	squashedLayerConfig := into.LayerConfig
@@ -213,7 +215,7 @@ func (e *export) SquashLayers(into, from *layer, tarstream io.Reader, outstream 
 			dir = latestDirHeader
 		}
 		dir.Name = current.LayerConfig.ID + "/"
-		if err := tw.WriteHeader(dir); err != nil {
+		if err := tw.Add(&tarball.TarFile{Header: dir}); err != nil {
 			return "", err
 		}
 
@@ -225,10 +227,11 @@ func (e *export) SquashLayers(into, from *layer, tarstream io.Reader, outstream 
 			version = latestVersionHeader
 		}
 		version.Name = current.LayerConfig.ID + "/VERSION"
-		if err := tw.WriteHeader(version); err != nil {
-			return "", err
-		}
-		if _, err := tw.Write([]byte("1.0")); err != nil {
+
+		if err := tw.Add(&tarball.TarFile{
+			Header: version,
+			Stream: bytes.NewBuffer([]byte("1.0")),
+		}); err != nil {
 			return "", err
 		}
 
@@ -252,10 +255,11 @@ func (e *export) SquashLayers(into, from *layer, tarstream io.Reader, outstream 
 			return "", err
 		}
 		jsonHdr.Size = int64(len(jsonBytes))
-		if err := tw.WriteHeader(jsonHdr); err != nil {
-			return "", err
-		}
-		if _, err := tw.Write(jsonBytes); err != nil {
+
+		if err := tw.Add(&tarball.TarFile{
+			Header: jsonHdr,
+			Stream: bytes.NewBuffer(jsonBytes),
+		}); err != nil {
 			return "", err
 		}
 
@@ -275,14 +279,16 @@ func (e *export) SquashLayers(into, from *layer, tarstream io.Reader, outstream 
 				return "", err
 			}
 			layerTar.Size = fi.Size()
-			tw.WriteHeader(layerTar)
-			if _, err := io.Copy(tw, tempfile); err != nil {
-				return "", nil
+			if err := tw.Add(&tarball.TarFile{Header: layerTar, Stream: tempfile}); err != nil {
+				return "", err
 			}
 		} else {
 			layerTar.Size = 1024
-			tw.WriteHeader(layerTar)
-			tw.Write(bytes.Repeat([]byte("\x00"), 1024))
+			if err := tw.Add(
+				&tarball.TarFile{Header: layerTar, Stream: bytes.NewBuffer(bytes.Repeat([]byte("\x00"), 1024))},
+			); err != nil {
+				return "", err
+			}
 		}
 
 		if index == len(order)-1 {
@@ -305,14 +311,11 @@ func (e *export) rewriteChildren(from *layer) error {
 		if entry == nil {
 			break
 		}
-
 		child := e.ChildOf(entry.LayerConfig.ID)
 
-		/*
-			if the layer is not the squash layer
-				if: we have a #(nop) that is not an ADD, skip it
-				else: remove the stuff in the layer.tar
-		*/
+		// if the layer is not the squash layer
+		// => if: we have a #(nop) that is not an ADD, skip it
+		// => else: remove the stuff in the layer.tar
 		if entry.LayerConfig.ID != squashID && !strings.Contains(entry.Cmd(), "#(squash)") {
 			if strings.Contains(entry.Cmd(), "#(nop)") && !strings.Contains(entry.Cmd(), "ADD") {
 				if err := e.ReplaceLayer(entry); err != nil {
@@ -322,7 +325,6 @@ func (e *export) rewriteChildren(from *layer) error {
 				e.RemoveLayer(entry)
 			}
 		}
-
 		entry = child
 	}
 	return nil
