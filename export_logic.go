@@ -18,9 +18,9 @@ var uuidRegex = regexp.MustCompile("^[a-f0-9]{64}$")
 func (e *export) IngestImageMetadata(tarstream io.Reader) error {
 	if err := tarball.Walk(tarstream, func(t *tarball.TarFile) error {
 		switch Type(t) {
-		case IGNORE:
+		case Ignore:
 			return nil
-		case REPOSITORIES:
+		case Repositories:
 			if err := json.NewDecoder(t.Stream).Decode(&e.Repositories); err != nil {
 				return err
 			}
@@ -43,7 +43,7 @@ func (e *export) IngestImageMetadata(tarstream io.Reader) error {
 			if err := json.NewDecoder(t.Stream).Decode(&e.Layers[uuid].LayerConfig); err != nil {
 				return err
 			}
-		case LAYER_TAR:
+		case LayerTar:
 			uuid := t.NameParts()[0]
 			if e.Layers[uuid] == nil {
 				e.Layers[uuid] = &layer{}
@@ -145,10 +145,10 @@ func (e *export) SquashLayers(into, from *layer, tarstream io.Reader, outstream 
 	if err = tarball.Walk(tarstream, func(t *tarball.TarFile) error {
 		nameParts := t.NameParts()
 		switch Type(t) {
-		case DIRECTORY:
+		case Directory:
 			uuidPart := nameParts[0]
 			e.Layers[uuidPart].DirHeader = t.Header
-		case LAYER_TAR:
+		case LayerTar:
 			uuidPart := nameParts[0]
 			e.Layers[uuidPart].LayerTarHeader = t.Header
 			if err := tarball.Walk(t.Stream, func(tf *tarball.TarFile) error {
@@ -163,7 +163,7 @@ func (e *export) SquashLayers(into, from *layer, tarstream io.Reader, outstream 
 			}); err != nil {
 				return err
 			}
-		case VERSION:
+		case Version:
 			uuidPart := nameParts[0]
 			e.Layers[uuidPart].VersionHeader = t.Header
 		}
