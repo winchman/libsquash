@@ -13,33 +13,42 @@ import (
 	"github.com/winchman/libsquash/tarball"
 )
 
-var nameRegex = regexp.MustCompile(`^\.$|^\.\.$|^\.\/$`)
 var uuidRegex = regexp.MustCompile("^[a-f0-9]{64}$")
 
 func (e *export) IngestImageMetadata(tarstream io.Reader) error {
-	if err := tarball.Walk(tarstream, func(t *tarball.TarFile) error {
-		if ignore(t) {
+	err := tarball.Walk(tarstream, func(t *tarball.TarFile) error {
+		switch Type(t) {
+		case IGNORE:
 			return nil
-		}
-
-		uuid := nameFirst(t)
-		//file := nameSecond(t)
-
-		if e.Layers[uuid] == nil {
-			e.Layers[uuid] = &layer{}
-		}
-
-		if repositories(t) {
-			if err := checkRepositories(e, t); err != nil {
+		case REPOSITORIES:
+			if err := json.NewDecoder(t.Stream).Decode(&e.Repositories); err != nil {
 				return err
 			}
-		} else if jsonFile(t) {
+			// Export may have multiple branches with the same parent. Abort.
+			for _, v := range e.Repositories {
+				commits := map[string]string{}
+				for tag, commit := range *v {
+					commits[commit] = tag
+				}
+				if len(commits) > 1 {
+					return errorMultipleBranchesSameParent
+				}
+			}
+		case JSON:
+			uuid := t.NameParts()[0]
+			if e.Layers[uuid] == nil {
+				e.Layers[uuid] = &layer{}
+			}
 			e.Layers[uuid].JSONHeader = t.Header
 			if err := json.NewDecoder(t.Stream).Decode(&e.Layers[uuid].LayerConfig); err != nil {
 				return err
 			}
-		} else if layerTar(t) {
-			if err := tarball.Walk(t.Stream, func(tf *tarball.TarFile) error {
+		case LAYER_TAR:
+			uuid := t.NameParts()[0]
+			if e.Layers[uuid] == nil {
+				e.Layers[uuid] = &layer{}
+			}
+			err := tarball.Walk(t.Stream, func(tf *tarball.TarFile) error {
 				filePath := nameWithoutWhiteoutPrefix(tf.Name())
 				if e.fileToLayers[filePath] == nil {
 					e.fileToLayers[filePath] = []fileLoc{}
@@ -57,15 +66,21 @@ func (e *export) IngestImageMetadata(tarstream io.Reader) error {
 					})
 				}
 				return nil
-			}); err != nil {
+			})
+			if err != nil {
 				return err
 			}
 		}
-
 		return nil
-	}); err != nil {
+	})
+	if err != nil {
 		return err
 	}
+
+	return e.populateFileData()
+}
+
+func (e *export) populateFileData() error {
 
 	e.start = e.FirstSquash()
 
@@ -78,7 +93,6 @@ func (e *export) IngestImageMetadata(tarstream io.Reader) error {
 		return errorNoFROM
 	}
 
-	// TODO: optimize creation of ordered list - currently n^2, can be n
 	index := 0
 	current := e.start
 	orderMap := map[string]int{}
