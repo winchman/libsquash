@@ -182,13 +182,13 @@ func (e *export) SquashLayers(into, from *layer, tarstream io.Reader, outstream 
 		return "", err
 	}
 
-	var tw = tar.NewWriter(outstream)
-	var latestDirHeader, latestVersionHeader, latestJSONHeader, latestTarHeader *tar.Header
-
 	debug("  -  Rewriting child history")
 	if err := e.rewriteChildren(into); err != nil {
 		return "", err
 	}
+
+	var tw = tar.NewWriter(outstream)
+	var latestDirHeader, latestVersionHeader, latestJSONHeader, latestTarHeader *tar.Header
 
 	squashedLayerConfig := into.LayerConfig
 
