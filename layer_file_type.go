@@ -29,7 +29,8 @@ const (
 	// Version is for "<uuid>/VERSION"
 	Version
 
-	// Unknown is for files that cannot be otherwise identified
+	// Unknown is for files that cannot be otherwise identified and should
+	// either be treated as an error or ignored
 	Unknown
 )
 
@@ -43,15 +44,15 @@ func Type(t *tarball.TarFile) LayerFileType {
 		return Ignore
 	}
 	nameParts := t.NameParts()
-
-	if len(nameParts) == 0 {
+	switch len(nameParts) {
+	case 0:
 		return Ignore
-	} else if len(nameParts) == 1 {
+	case 1:
 		if nameParts[0] == "repositories" {
 			return Repositories
 		}
 		return Unknown
-	} else if len(nameParts) == 2 {
+	case 2:
 		switch nameParts[1] {
 		case "":
 			return Directory
@@ -63,6 +64,5 @@ func Type(t *tarball.TarFile) LayerFileType {
 			return Version
 		}
 	}
-
 	return Unknown
 }

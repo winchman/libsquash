@@ -2,12 +2,15 @@ package libsquash
 
 type tagInfo map[string]string
 
-type export struct {
-	Layers       map[string]*layer
+// An Export contains the layers of the image as well as various forms of
+// metadata.  An export "ingests" this metadata and then uses it to determine
+// how to compose the squashed image
+type Export struct {
+	Layers       map[string]*Layer
 	Repositories map[string]*tagInfo
 	fileToLayers map[string][]fileLoc
 	layerToFiles map[string]map[string]bool
-	start        *layer
+	start        *Layer
 	whiteouts    []whiteoutFile
 }
 
@@ -21,9 +24,10 @@ type whiteoutFile struct {
 	prefix string // the file name prefix (without the ".wh." part)
 }
 
-func newExport() *export {
-	return &export{
-		Layers:       map[string]*layer{},
+// NewExport returns a fully initialized *Export
+func NewExport() *Export {
+	return &Export{
+		Layers:       map[string]*Layer{},
 		Repositories: map[string]*tagInfo{},
 		fileToLayers: map[string][]fileLoc{},
 		layerToFiles: map[string]map[string]bool{},

@@ -5,7 +5,7 @@ import (
 	"strings"
 )
 
-func (e *export) firstLayer(pattern string) *layer {
+func (e *Export) firstLayer(pattern string) *Layer {
 	root := e.Root()
 	for {
 		if root == nil {
@@ -21,32 +21,18 @@ func (e *export) firstLayer(pattern string) *layer {
 	return root
 }
 
-func (e *export) FirstFrom() *layer {
-	return e.firstLayer("#(nop) ADD file")
-}
-
-func (e *export) FirstSquash() *layer {
+// FirstSquash finds the first layer marked with the token #(squash)
+func (e *Export) FirstSquash() *Layer {
 	return e.firstLayer("#(squash)")
 }
 
 // Root returns the top layer in the export
-func (e *export) Root() *layer {
+func (e *Export) Root() *Layer {
 	return e.ChildOf("")
 }
 
-func (e *export) LastChild() *layer {
-	c := e.Root()
-	for {
-		if e.ChildOf(c.LayerConfig.ID) == nil {
-			break
-		}
-		c = e.ChildOf(c.LayerConfig.ID)
-	}
-	return c
-}
-
 // ChildOf returns the child layer or nil of the parent
-func (e *export) ChildOf(parent string) *layer {
+func (e *Export) ChildOf(parent string) *Layer {
 	for _, entry := range e.Layers {
 		if entry.LayerConfig.Parent == parent {
 			return entry
@@ -55,10 +41,10 @@ func (e *export) ChildOf(parent string) *layer {
 	return nil
 }
 
-// GetById returns an exportedImaged with a prefix matching ID.  An error
+// GetByID returns an exportedImaged with a prefix matching ID.  An error
 // is returned multiple exportedImages matched.
-func (e *export) GetByID(idPrefix string) (*layer, error) {
-	matches := []*layer{}
+func (e *Export) GetByID(idPrefix string) (*Layer, error) {
+	matches := []*Layer{}
 	for id, entry := range e.Layers {
 		if strings.HasPrefix(id, idPrefix) {
 			matches = append(matches, entry)

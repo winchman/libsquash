@@ -6,14 +6,25 @@ import (
 	"encoding/json"
 	"io"
 	"os"
-	"regexp"
 
 	"github.com/winchman/libsquash/tarball"
 )
 
-var uuidRegex = regexp.MustCompile("^[a-f0-9]{64}$")
+/*
+RebuildImage builds the final image tarball using the following process:
 
-func (e *export) RebuildImage(into *layer, outstream io.Writer, squashLayerFile *os.File) (imageID string, err error) {
+1. Open up a new tar stream that writes to the output stream
+2. For each layer that should be in the final tarball (based on the current
+   LayerConfig data), write the four rquired files
+	a. <uuid>/  -> directory, no file contents
+	b. <uuid>/VERSION -> contents always the same
+	c. <uuid>/json -> the LayerConfig
+	d. <uuid>/layer.tar -> the tarball for the given layer
+		i.  if this is the #(squash) layer, it should contain all of the image's data
+		ii. if it is any other layer, it will contain only 2x 512 byte blocks of \x00
+		    (this is the way to represent an empty tarball)
+*/
+func (e *Export) RebuildImage(squashLayer *Layer, outstream io.Writer, squashLayerFile *os.File) (imageID string, err error) {
 	var (
 		latestDirHeader, latestVersionHeader *tar.Header
 		latestJSONHeader, latestTarHeader    *tar.Header
@@ -21,7 +32,7 @@ func (e *export) RebuildImage(into *layer, outstream io.Writer, squashLayerFile 
 	)
 
 	tw := tarball.NewTarstream(outstream)
-	squashedLayerConfig := into.LayerConfig
+	squashedLayerConfig := squashLayer.LayerConfig
 	current := e.Root()
 
 	for {
@@ -45,7 +56,7 @@ func (e *export) RebuildImage(into *layer, outstream io.Writer, squashLayerFile 
 
 		var jsonBytes []byte
 		var err error
-		if current.LayerConfig.ID == into.LayerConfig.ID {
+		if current.LayerConfig.ID == squashLayer.LayerConfig.ID {
 			jsonBytes, err = json.Marshal(squashedLayerConfig)
 		} else {
 			jsonBytes, err = json.Marshal(current.LayerConfig)
@@ -62,7 +73,7 @@ func (e *export) RebuildImage(into *layer, outstream io.Writer, squashLayerFile 
 		layerTar, latestTarHeader = chooseDefault(current.LayerTarHeader, latestTarHeader)
 		layerTar.Name = current.LayerConfig.ID + "/layer.tar"
 
-		if current.LayerConfig.ID == into.LayerConfig.ID {
+		if current.LayerConfig.ID == squashLayer.LayerConfig.ID {
 			fi, err := squashLayerFile.Stat()
 			if err != nil {
 				return "", err
@@ -94,6 +105,7 @@ func (e *export) RebuildImage(into *layer, outstream io.Writer, squashLayerFile 
 	return retID, nil
 }
 
+// for keeping a running default and only using it if the current provided is nil
 func chooseDefault(alpha, beta *tar.Header) (*tar.Header, *tar.Header) {
 	if beta == nil {
 		beta = alpha

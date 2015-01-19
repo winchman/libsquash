@@ -19,11 +19,41 @@ var (
 	ErrorNoFROM = errors.New("no root layer found")
 )
 
-func (e *export) IngestImageMetadata(tarstream io.Reader) error {
+/*
+IngestImageMetadata walks the files in the "tarstream" tarball and checks for
+several things:
+
+1. check for the "repositories" file - if present, determine if it cancels the squash
+2. check for each "json" file, read it into a data structure
+3. check for each "layer.tar" file, noting which filesystem files are present
+  or deleted via aufs-style whiteout files (.wh..wh.<file>)
+
+To determine what files should come from each layer.tar (which was the last to
+modify that file), we build a list like so:
+
+fileToLayers:
+------------
+file1: []layer
+file2: []layer
+
+After completing the processing of the tarball, this function calls
+another that translates the list as follows (note: a uuid is the unique
+identifier for a layer):
+
+layerToFiles:
+------------
+uuid1: file1 -> true, file3 -> true
+uuid2: file2 -> true
+
+The next time we we iterate over the image tarball, we only have one layer.tar
+at a time.  We need to know, based on the uuid of that layer.tar, which files
+to pull from it. That requires the layerToFiles structure.
+*/
+func (e *Export) IngestImageMetadata(tarstream io.Reader) error {
 	if err := tarball.Walk(tarstream, func(t *tarball.TarFile) error {
 		switch Type(t) {
 		case Ignore:
-			return nil
+			// ignore
 		case Repositories:
 			if err := json.NewDecoder(t.Stream).Decode(&e.Repositories); err != nil {
 				return err
@@ -41,7 +71,7 @@ func (e *export) IngestImageMetadata(tarstream io.Reader) error {
 		case JSON:
 			uuid := t.NameParts()[0]
 			if e.Layers[uuid] == nil {
-				e.Layers[uuid] = &layer{}
+				e.Layers[uuid] = &Layer{}
 			}
 			e.Layers[uuid].JSONHeader = t.Header
 			if err := json.NewDecoder(t.Stream).Decode(&e.Layers[uuid].LayerConfig); err != nil {
@@ -50,7 +80,7 @@ func (e *export) IngestImageMetadata(tarstream io.Reader) error {
 		case LayerTar:
 			uuid := t.NameParts()[0]
 			if e.Layers[uuid] == nil {
-				e.Layers[uuid] = &layer{}
+				e.Layers[uuid] = &Layer{}
 			}
 			if err := tarball.Walk(t.Stream, func(tf *tarball.TarFile) error {
 				filePath := nameWithoutWhiteoutPrefix(tf.Name())
@@ -82,7 +112,8 @@ func (e *export) IngestImageMetadata(tarstream io.Reader) error {
 	return e.populateFileData()
 }
 
-func (e *export) populateFileData() error {
+// populateFileData populates the layerToFiles as described above
+func (e *Export) populateFileData() error {
 
 	e.start = e.FirstSquash()
 

@@ -5,15 +5,31 @@ import (
 	"strings"
 )
 
-type layer struct {
-	LayerConfig    *layerConfig
-	DirHeader      *tar.Header
-	VersionHeader  *tar.Header
-	JSONHeader     *tar.Header
+/*
+Layer represents a layer inside the docker image. A Layer consists of a struct
+representation of the json config and placeholders for the tar headers for the
+various required files
+*/
+type Layer struct {
+	// LayerConfig is the layer config json
+	LayerConfig *LayerConfig
+
+	// DirHeader is the header for <uuid>/
+	DirHeader *tar.Header
+
+	// VersionHeader is the header for <uuid>/VERSION
+	VersionHeader *tar.Header
+
+	// JSONHeader is the header for <uuid>/json
+	JSONHeader *tar.Header
+
+	// LayerTarHeader is the header for <uuid>/layer.tar
 	LayerTarHeader *tar.Header
 }
 
-func (l *layer) Cmd() string {
+// Cmd is a convenience function that prints out the command for layer "l". The
+// command is shortened to be no more than 60 characters
+func (l *Layer) Cmd() string {
 	ret := strings.Join(l.LayerConfig.ContainerConfig().Cmd, " ")
 	if len(ret) > 60 {
 		ret = ret[:60]

@@ -11,9 +11,17 @@ import (
 Squash squashes a docker image where instream is an io.Reader for the image
 tarball, outstream is an io.Writer to which the squashed image tarball will be written,
 and imageIDOut is an io.Writer to which the id of the squashed image will be written
+
+The steps are as follows:
+
+1. Go through stream, tee'ing it to a tempfile, get layer configs and layer->file lists
+2. Using the metadata, go through the tar stream again (from the tempfile),
+   build the squash layer, build the final image tar, and write it to our output stream
+(3. as a cleanup step, write the id of the final layer, which the daemon will
+use as the image id)
 */
 func Squash(instream io.Reader, outstream io.Writer, imageIDOut io.Writer) error {
-	export := newExport()
+	export := NewExport()
 	tempfile, err := ioutil.TempFile("", "libsquash")
 	if err != nil {
 		return err
@@ -26,7 +34,9 @@ func Squash(instream io.Reader, outstream io.Writer, imageIDOut io.Writer) error
 
 	instreamTee := io.TeeReader(instream, tempfile)
 
-	// populate metadata from first stream
+	/*
+		1. Ingest Image Metadata: populate metadata from first stream
+	*/
 	export.IngestImageMetadata(instreamTee)
 
 	// rewind tempfile to the entire tar stream can be read back in
@@ -46,12 +56,17 @@ func Squash(instream io.Reader, outstream io.Writer, imageIDOut io.Writer) error
 		printVerbose(export, newEntry.LayerConfig.ID)
 	}
 
-	// squash all later layers into our new layer (from second stream)
+	/*
+		2. squash all later layers into our new layer (from second stream)
+	*/
 	imageID, err := export.SquashLayers(newEntry, export.start, tempfile, outstream)
 	if err != nil {
 		return err
 	}
 
+	/*
+		3. write the imageID to the imageID output stream
+	*/
 	if _, err := imageIDOut.Write([]byte(imageID)); err != nil {
 		return err
 	}
@@ -59,7 +74,7 @@ func Squash(instream io.Reader, outstream io.Writer, imageIDOut io.Writer) error
 	return nil
 }
 
-func printVerbose(export *export, newEntryID string) {
+func printVerbose(export *Export, newEntryID string) {
 	e := export.Root()
 	for {
 		if e == nil {

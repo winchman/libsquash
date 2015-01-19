@@ -4,21 +4,24 @@ import (
 	"time"
 )
 
-type layerConfig struct {
+// LayerConfig is the top-level json config for ar docker layer
+type LayerConfig struct {
 	ID                string           `json:"id"`
 	Parent            string           `json:"parent,omitempty"`
 	Comment           string           `json:"comment"`
 	Created           time.Time        `json:"created"`
-	V1ContainerConfig *containerConfig `json:"ContainerConfig,omitempty"`  // Docker 1.0.0, 1.0.1
-	V2ContainerConfig *containerConfig `json:"container_config,omitempty"` // All other versions
+	V1ContainerConfig *ContainerConfig `json:"ContainerConfig,omitempty"`  // Docker 1.0.0, 1.0.1
+	V2ContainerConfig *ContainerConfig `json:"container_config,omitempty"` // All other versions
 	Container         string           `json:"container"`
-	Config            *config          `json:"config,omitempty"`
+	Config            *Config          `json:"config,omitempty"`
 	DockerVersion     string           `json:"docker_version"`
 	Architecture      string           `json:"architecture"`
 }
 
-func newLayerConfig(id, parent, comment string) *layerConfig {
-	return &layerConfig{
+// NewLayerConfig produces an empty LayerConfig, initialized with a few
+// sensible defaults
+func NewLayerConfig(id, parent, comment string) *LayerConfig {
+	return &LayerConfig{
 		ID:            id,
 		Parent:        parent,
 		Comment:       comment,
@@ -28,7 +31,8 @@ func newLayerConfig(id, parent, comment string) *layerConfig {
 	}
 }
 
-type containerConfig struct {
+// ContainerConfig is a sub config of LayerConfig
+type ContainerConfig struct {
 	AttachStderr    bool
 	AttachStdin     bool
 	AttachStdout    bool
@@ -53,7 +57,8 @@ type containerConfig struct {
 	VolumesFrom     string
 }
 
-type config struct {
+// Config is a sub config of LayerConfig
+type Config struct {
 	AttachStderr    bool
 	AttachStdin     bool
 	AttachStdout    bool
@@ -80,7 +85,9 @@ type config struct {
 	WorkingDir      string
 }
 
-func (l *layerConfig) ContainerConfig() *containerConfig {
+// ContainerConfig normalizes the V1 and V2ContainerConfig and returns the
+// correct version
+func (l *LayerConfig) ContainerConfig() *ContainerConfig {
 	if l.V2ContainerConfig != nil {
 		return l.V2ContainerConfig
 	}
@@ -93,7 +100,7 @@ func (l *layerConfig) ContainerConfig() *containerConfig {
 		return l.V2ContainerConfig
 	}
 
-	l.V2ContainerConfig = &containerConfig{}
+	l.V2ContainerConfig = &ContainerConfig{}
 
 	return l.V2ContainerConfig
 }

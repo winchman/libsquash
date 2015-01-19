@@ -6,16 +6,20 @@ import (
 	"time"
 )
 
-func (e *export) InsertLayer(parent string) (*layer, error) {
+/*
+InsertLayer inserts a new layer after "parent" with the token #(squash)
+command. Return the new layer
+*/
+func (e *Export) InsertLayer(parent string) (*Layer, error) {
 	id, err := newID()
 	if err != nil {
 		return nil, err
 	}
 
-	layerConfig := newLayerConfig(id, parent, "squashed w/ libsquash")
+	layerConfig := NewLayerConfig(id, parent, "squashed w/ libsquash")
 	layerConfig.ContainerConfig().Cmd = []string{"/bin/sh", "-c", fmt.Sprintf("#(squash) from %s", parent[:12])}
 
-	entry := &layer{
+	entry := &Layer{
 		LayerConfig: layerConfig,
 	}
 
@@ -30,7 +34,11 @@ func (e *export) InsertLayer(parent string) (*layer, error) {
 	return entry, err
 }
 
-func (e *export) ReplaceLayer(orig *layer) error {
+/*
+ReplaceLayer refreshes layer "orig" by updating the Created timestamp and ID
+and wiring it in correctly
+*/
+func (e *Export) ReplaceLayer(orig *Layer) error {
 	newID, err := newID()
 	if err != nil {
 		return err
@@ -39,7 +47,7 @@ func (e *export) ReplaceLayer(orig *layer) error {
 	oldID := orig.LayerConfig.ID
 	child := e.ChildOf(oldID)
 
-	newLayer := &layer{LayerConfig: orig.LayerConfig}
+	newLayer := &Layer{LayerConfig: orig.LayerConfig}
 	newLayer.LayerConfig.Created = time.Now().UTC()
 	newLayer.LayerConfig.ID = newID
 
@@ -59,7 +67,8 @@ func (e *export) ReplaceLayer(orig *layer) error {
 	return nil
 }
 
-func (e *export) RemoveLayer(l *layer) {
+// RemoveLayer removes layer "l" and wires its parent to its child
+func (e *Export) RemoveLayer(l *Layer) {
 	layerID := l.LayerConfig.ID
 
 	debugf("  -  Removing %s. Squashed. (%s)\n", layerID[:12], l.Cmd())
