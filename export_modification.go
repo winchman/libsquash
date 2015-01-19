@@ -12,7 +12,7 @@ func (e *export) InsertLayer(parent string) (*layer, error) {
 		return nil, err
 	}
 
-	layerConfig := newLayerConfig(id, parent, "squashed w/ docker-squash")
+	layerConfig := newLayerConfig(id, parent, "squashed w/ libsquash")
 	layerConfig.ContainerConfig().Cmd = []string{"/bin/sh", "-c", fmt.Sprintf("#(squash) from %s", parent[:12])}
 
 	entry := &layer{
