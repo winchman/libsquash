@@ -14,61 +14,33 @@ import (
 var uuidRegex = regexp.MustCompile("^[a-f0-9]{64}$")
 
 func (e *export) RebuildImage(into *layer, outstream io.Writer, squashLayerFile *os.File) (imageID string, err error) {
+	var (
+		latestDirHeader, latestVersionHeader *tar.Header
+		latestJSONHeader, latestTarHeader    *tar.Header
+		retID                                string
+	)
 
 	tw := tarball.NewTarstream(outstream)
-
-	var latestDirHeader, latestVersionHeader, latestJSONHeader, latestTarHeader *tar.Header
-
 	squashedLayerConfig := into.LayerConfig
-
 	current := e.Root()
-	order := []*layer{} // TODO: optimize, remove this
+
 	for {
-		order = append(order, current)
-		current = e.ChildOf(current.LayerConfig.ID)
-		if current == nil {
-			break
-		}
-	}
-
-	var retID string
-
-	for index, current := range order {
-		var dir = current.DirHeader
-		if latestDirHeader == nil {
-			latestDirHeader = dir
-		}
-		if dir == nil {
-			dir = latestDirHeader
-		}
+		var dir *tar.Header
+		dir, latestDirHeader = chooseDefault(current.DirHeader, latestDirHeader)
 		dir.Name = current.LayerConfig.ID + "/"
 		if err := tw.Add(&tarball.TarFile{Header: dir}); err != nil {
 			return "", err
 		}
 
-		var version = current.VersionHeader
-		if latestVersionHeader == nil {
-			latestVersionHeader = version
-		}
-		if version == nil {
-			version = latestVersionHeader
-		}
+		var version *tar.Header
+		version, latestVersionHeader = chooseDefault(current.VersionHeader, latestVersionHeader)
 		version.Name = current.LayerConfig.ID + "/VERSION"
-
-		if err := tw.Add(&tarball.TarFile{
-			Header: version,
-			Stream: bytes.NewBuffer([]byte("1.0")),
-		}); err != nil {
+		if err := tw.Add(&tarball.TarFile{Header: version, Stream: bytes.NewBuffer([]byte("1.0"))}); err != nil {
 			return "", err
 		}
 
-		var jsonHdr = current.JSONHeader
-		if latestJSONHeader == nil {
-			latestJSONHeader = jsonHdr
-		}
-		if jsonHdr == nil {
-			jsonHdr = latestJSONHeader
-		}
+		var jsonHdr *tar.Header
+		jsonHdr, latestJSONHeader = chooseDefault(current.JSONHeader, latestJSONHeader)
 		jsonHdr.Name = current.LayerConfig.ID + "/json"
 
 		var jsonBytes []byte
@@ -82,22 +54,12 @@ func (e *export) RebuildImage(into *layer, outstream io.Writer, squashLayerFile 
 			return "", err
 		}
 		jsonHdr.Size = int64(len(jsonBytes))
-
-		if err := tw.Add(&tarball.TarFile{
-			Header: jsonHdr,
-			Stream: bytes.NewBuffer(jsonBytes),
-		}); err != nil {
+		if err := tw.Add(&tarball.TarFile{Header: jsonHdr, Stream: bytes.NewBuffer(jsonBytes)}); err != nil {
 			return "", err
 		}
 
-		var layerTar = current.LayerTarHeader
-		if latestTarHeader == nil {
-			latestTarHeader = layerTar
-		}
-		if layerTar == nil {
-			layerTar = latestTarHeader
-		}
-
+		var layerTar *tar.Header
+		layerTar, latestTarHeader = chooseDefault(current.LayerTarHeader, latestTarHeader)
 		layerTar.Name = current.LayerConfig.ID + "/layer.tar"
 
 		if current.LayerConfig.ID == into.LayerConfig.ID {
@@ -118,14 +80,26 @@ func (e *export) RebuildImage(into *layer, outstream io.Writer, squashLayerFile 
 			}
 		}
 
-		if index == len(order)-1 {
+		child := e.ChildOf(current.LayerConfig.ID)
+		if child == nil {
 			retID = current.LayerConfig.ID
+			break
 		}
+		current = child
 	}
-
 	if err := tw.Close(); err != nil {
 		return "", err
 	}
 
 	return retID, nil
+}
+
+func chooseDefault(alpha, beta *tar.Header) (*tar.Header, *tar.Header) {
+	if beta == nil {
+		beta = alpha
+	}
+	if alpha == nil {
+		alpha = beta
+	}
+	return alpha, beta
 }
