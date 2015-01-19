@@ -9,10 +9,14 @@ import (
 )
 
 var (
-	errorMultipleBranchesSameParent = errors.New("this image is a full repository export w/ multiple images in it. " +
-		"Please generate the export from a specific image ID or tag.",
+	// ErrorMultipleBranchesSameParent is an edge case that libsquash does not currently handle
+	ErrorMultipleBranchesSameParent = errors.New("this image is a full " +
+		"repository export w/ multiple images in it. Please generate the export " +
+		"from a specific image ID or tag.",
 	)
-	errorNoFROM = errors.New("no layer matching FROM")
+
+	// ErrorNoFROM is returned when o root layer can be found
+	ErrorNoFROM = errors.New("no root layer found")
 )
 
 func (e *export) IngestImageMetadata(tarstream io.Reader) error {
@@ -31,7 +35,7 @@ func (e *export) IngestImageMetadata(tarstream io.Reader) error {
 					commits[commit] = tag
 				}
 				if len(commits) > 1 {
-					return errorMultipleBranchesSameParent
+					return ErrorMultipleBranchesSameParent
 				}
 			}
 		case JSON:
@@ -88,7 +92,7 @@ func (e *export) populateFileData() error {
 	}
 
 	if e.start == nil {
-		return errorNoFROM
+		return ErrorNoFROM
 	}
 
 	index := 0
