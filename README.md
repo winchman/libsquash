@@ -14,8 +14,7 @@ but the squashing functionality is extracted into a package named
 
 0. does not write any layer data to disk
 0. does not require `sudo`
-0. does not depend on the installation of any particular version of
-   `tar` (or any version at all)
+0. does not shell out to or require the installation of `tar`
 
 Other information:
 
