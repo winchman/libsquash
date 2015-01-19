@@ -51,7 +51,7 @@ to pull from it. That requires the layerToFiles structure.
 */
 func (e *Export) IngestImageMetadata(tarstream io.Reader) error {
 	if err := tarball.Walk(tarstream, func(t *tarball.TarFile) error {
-		switch Type(t) {
+		switch ParseType(t) {
 		case Ignore:
 			// ignore
 		case Repositories:

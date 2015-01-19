@@ -30,7 +30,7 @@ func (e *Export) SquashLayers(into, from *Layer, tarstream io.Reader, outstream 
 	// write contents of layer.tar of "squash layer" into tempfile
 	if err = tarball.Walk(tarstream, func(t *tarball.TarFile) error {
 		nameParts := t.NameParts()
-		switch Type(t) {
+		switch ParseType(t) {
 		case Directory:
 			uuidPart := nameParts[0]
 			e.Layers[uuidPart].DirHeader = t.Header

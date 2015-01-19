@@ -38,8 +38,8 @@ const (
 // type Ignore
 var LayerFileIgnoreRegex = regexp.MustCompile(`^\.$|^\.\.$|^\.\/$`)
 
-// Type returns the LayerFileType of the given tarball
-func Type(t *tarball.TarFile) LayerFileType {
+// ParseType returns the LayerFileType of the given tarball
+func ParseType(t *tarball.TarFile) LayerFileType {
 	if LayerFileIgnoreRegex.MatchString(t.Name()) {
 		return Ignore
 	}
