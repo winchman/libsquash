@@ -34,7 +34,6 @@ $(_subcommands)
 USAGE
 }
 
-
 function _subcommands() {
  for cmd in $(_cmd_list) ; do
    printf "  $cmd" | tr "_" "-"

@@ -6,8 +6,8 @@ import (
 	"github.com/winchman/libsquash/tarball"
 )
 
-// LayerFileType is a type for identifying a file in a tarball as specific to a
-// docker imag
+// LayerFileType is a type for identifying a file in a tarball as specific to
+// how this library parses a docker image
 type LayerFileType uint8
 
 const (
@@ -29,8 +29,7 @@ const (
 	// Version is for "<uuid>/VERSION"
 	Version
 
-	// Unknown is for files that cannot be otherwise identified and should
-	// either be treated as an error or ignored
+	// Unknown is for files that cannot be otherwise identified
 	Unknown
 )
 
@@ -38,7 +37,7 @@ const (
 // type Ignore
 var LayerFileIgnoreRegex = regexp.MustCompile(`^\.$|^\.\.$|^\.\/$`)
 
-// ParseType returns the LayerFileType of the given tarball
+// ParseType returns the LayerFileType of the given tar file
 func ParseType(t *tarball.TarFile) LayerFileType {
 	if LayerFileIgnoreRegex.MatchString(t.Name()) {
 		return Ignore

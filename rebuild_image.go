@@ -36,6 +36,7 @@ func (e *Export) RebuildImage(squashLayer *Layer, outstream io.Writer, squashLay
 	current := e.Root()
 
 	for {
+		// add "<uuid>/"
 		var dir *tar.Header
 		dir, latestDirHeader = chooseDefault(current.DirHeader, latestDirHeader)
 		dir.Name = current.LayerConfig.ID + "/"
@@ -43,6 +44,7 @@ func (e *Export) RebuildImage(squashLayer *Layer, outstream io.Writer, squashLay
 			return "", err
 		}
 
+		// add "<uuid>/VERSION"
 		var version *tar.Header
 		version, latestVersionHeader = chooseDefault(current.VersionHeader, latestVersionHeader)
 		version.Name = current.LayerConfig.ID + "/VERSION"
@@ -50,12 +52,12 @@ func (e *Export) RebuildImage(squashLayer *Layer, outstream io.Writer, squashLay
 			return "", err
 		}
 
+		// add "<uuid>/json"
 		var jsonHdr *tar.Header
-		jsonHdr, latestJSONHeader = chooseDefault(current.JSONHeader, latestJSONHeader)
-		jsonHdr.Name = current.LayerConfig.ID + "/json"
-
 		var jsonBytes []byte
 		var err error
+		jsonHdr, latestJSONHeader = chooseDefault(current.JSONHeader, latestJSONHeader)
+		jsonHdr.Name = current.LayerConfig.ID + "/json"
 		if current.LayerConfig.ID == squashLayer.LayerConfig.ID {
 			jsonBytes, err = json.Marshal(squashedLayerConfig)
 		} else {
@@ -69,10 +71,10 @@ func (e *Export) RebuildImage(squashLayer *Layer, outstream io.Writer, squashLay
 			return "", err
 		}
 
+		// add "<uuid>/layer.tar"
 		var layerTar *tar.Header
 		layerTar, latestTarHeader = chooseDefault(current.LayerTarHeader, latestTarHeader)
 		layerTar.Name = current.LayerConfig.ID + "/layer.tar"
-
 		if current.LayerConfig.ID == squashLayer.LayerConfig.ID {
 			fi, err := squashLayerFile.Stat()
 			if err != nil {
@@ -91,17 +93,19 @@ func (e *Export) RebuildImage(squashLayer *Layer, outstream io.Writer, squashLay
 			}
 		}
 
+		// check loop condition
 		child := e.ChildOf(current.LayerConfig.ID)
 		if child == nil {
+			// return the ID of the last layer - it will be the image ID used by the daemon
 			retID = current.LayerConfig.ID
 			break
 		}
 		current = child
 	}
+	// close tar writer before returning
 	if err := tw.Close(); err != nil {
 		return "", err
 	}
-
 	return retID, nil
 }
 

@@ -12,21 +12,18 @@ type WalkFunc func(t *TarFile) error
 // passes each of them to the WalkFunc provided as an argument
 func Walk(tarstream io.Reader, walkFunc WalkFunc) error {
 	reader := tar.NewReader(tarstream)
-
-Read:
+ReadLoop:
 	for {
 		header, err := reader.Next()
 		if err != nil {
 			if err == io.EOF {
-				break Read
+				break ReadLoop
 			}
 			return err
 		}
-
 		if err := walkFunc(&TarFile{Header: header, Stream: reader}); err != nil {
 			return err
 		}
 	}
-
 	return nil
 }
