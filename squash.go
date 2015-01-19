@@ -1,18 +1,10 @@
 package libsquash
 
 import (
-	"errors"
 	"io"
 	"io/ioutil"
 	"os"
 	"strings"
-)
-
-var (
-	errorMultipleBranchesSameParent = errors.New("this image is a full repository export w/ multiple images in it. " +
-		"Please generate the export from a specific image ID or tag.",
-	)
-	errorNoFROM = errors.New("no layer matching FROM")
 )
 
 /*
