@@ -24,26 +24,28 @@ IngestImageMetadata walks the files in the "tarstream" tarball and checks for
 several things:
 
 1. check for the "repositories" file - if present, determine if it cancels the squash
+
 2. check for each "json" file, read it into a data structure
+
 3. check for each "layer.tar" file, noting which filesystem files are present
-  or deleted via aufs-style whiteout files (.wh..wh.<file>)
+or deleted via aufs-style whiteout files (.wh..wh.<file>)
 
 To determine what files should come from each layer.tar (which was the last to
 modify that file), we build a list like so:
 
-fileToLayers:
-------------
-file1: []layer
-file2: []layer
+	fileToLayers:
+	------------
+	file1: []layer
+	file2: []layer
 
 After completing the processing of the tarball, this function calls
 another that translates the list as follows (note: a uuid is the unique
 identifier for a layer):
 
-layerToFiles:
-------------
-uuid1: file1 -> true, file3 -> true
-uuid2: file2 -> true
+	layerToFiles:
+	------------
+	uuid1: file1 -> true, file3 -> true
+	uuid2: file2 -> true
 
 The next time we we iterate over the image tarball, we only have one layer.tar
 at a time.  We need to know, based on the uuid of that layer.tar, which files

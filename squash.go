@@ -15,9 +15,11 @@ and imageIDOut is an io.Writer to which the id of the squashed image will be wri
 The steps are as follows:
 
 1. Go through stream, tee'ing it to a tempfile, get layer configs and layer->file lists
+
 2. Using the metadata, go through the tar stream again (from the tempfile),
-   build the squash layer, build the final image tar, and write it to our output stream
-(3. as a cleanup step, write the id of the final layer, which the daemon will
+build the squash layer, build the final image tar, and write it to our output stream
+
+3. (as a cleanup step, write the id of the final layer, which the daemon will
 use as the image id)
 */
 func Squash(instream io.Reader, outstream io.Writer, imageIDOut io.Writer) error {

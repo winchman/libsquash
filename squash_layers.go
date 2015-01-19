@@ -82,16 +82,15 @@ func (e *Export) SquashLayers(into, from *Layer, tarstream io.Reader, outstream 
 RewriteChildren should only be called internally by SquashLayers.
 
 RewriteChildren contains the core logic about how to modify all layers that are
-inherited by the squash layer. The logic is as follows
+inherited by the squash layer. The logic is as follows:
 
-	- if the layer modifies the filesystem (is a RUN or a #(nop) ADD)
-		* remove it
-		* that layer will effectively be merged into the squash layer
-		* history from these layers will be lost
-	- if the layer does NOT modify the filesystem (is any other command type)
-		* keep it, but give it a new ID and timestamp
-		* the history of that layer and its changes (e.g. new env vars, new
-		  workdir, etc.) will be preserved
+ - if the layer modifies the filesystem (is a RUN or a #(nop) ADD)
+	* remove it
+	* that layer will effectively be merged into the squash layer
+	* history from these layers will be lost
+ - if the layer does NOT modify the filesystem (is any other command type)
+	* keep it, but give it a new ID and timestamp
+	* the history of that layer and its changes (e.g. new env vars, new workdir, etc.) will be preserved
 */
 func (e *Export) RewriteChildren(from *Layer) error {
 	var entry = from

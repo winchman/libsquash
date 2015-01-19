@@ -14,15 +14,15 @@ import (
 RebuildImage builds the final image tarball using the following process:
 
 1. Open up a new tar stream that writes to the output stream
+
 2. For each layer that should be in the final tarball (based on the current
-   LayerConfig data), write the four rquired files
-	a. <uuid>/  -> directory, no file contents
-	b. <uuid>/VERSION -> contents always the same
-	c. <uuid>/json -> the LayerConfig
-	d. <uuid>/layer.tar -> the tarball for the given layer
-		i.  if this is the #(squash) layer, it should contain all of the image's data
-		ii. if it is any other layer, it will contain only 2x 512 byte blocks of \x00
-		    (this is the way to represent an empty tarball)
+LayerConfig data), write the four rquired files
+	1. <uuid>/  -> directory, no file contents
+	2. <uuid>/VERSION -> contents always the same
+	3. <uuid>/json -> the LayerConfig
+	4. <uuid>/layer.tar -> the tarball for the given layer
+		a. if this is the #(squash) layer, it should contain all of the image's data
+		b. if it is any other layer, it will contain only 2x 512 byte blocks of \x00 (this is the way to represent an empty tarball)
 */
 func (e *Export) RebuildImage(squashLayer *Layer, outstream io.Writer, squashLayerFile *os.File) (imageID string, err error) {
 	var (
