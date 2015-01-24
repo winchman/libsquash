@@ -36,3 +36,14 @@ func (l *Layer) Cmd() string {
 	}
 	return ret
 }
+
+// Clone returns a copy of layer l
+func (l *Layer) Clone() *Layer {
+	return &Layer{
+		LayerConfig:    l.LayerConfig,
+		DirHeader:      l.DirHeader,
+		VersionHeader:  l.VersionHeader,
+		JSONHeader:     l.JSONHeader,
+		LayerTarHeader: l.LayerTarHeader,
+	}
+}

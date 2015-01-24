@@ -31,7 +31,8 @@ func NewLayerConfig(id, parent, comment string) *LayerConfig {
 	}
 }
 
-// ContainerConfig is a sub config of LayerConfig
+// ContainerConfig is a sub config of LayerConfig that represents the config
+// for the given layer only
 type ContainerConfig struct {
 	AttachStderr    bool
 	AttachStdin     bool
@@ -57,7 +58,7 @@ type ContainerConfig struct {
 	VolumesFrom     string
 }
 
-// Config is a sub config of LayerConfig
+// Config is a sub config of LayerConfig that represents the cumulative config
 type Config struct {
 	AttachStderr    bool
 	AttachStdin     bool

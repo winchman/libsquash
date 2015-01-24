@@ -1,10 +1,19 @@
 package libsquash
 
 import (
+	"errors"
 	"io"
 	"io/ioutil"
 	"os"
 	"strings"
+)
+
+var (
+	// ErrorNoLast is returned if it cannot be determined, by traversing the
+	// layers, what the last layer is. This should probably never happen, so if
+	// this error does occur, it's probably the result of the image tarball
+	// being malformed in some way
+	ErrorNoLast = errors.New("unable to determine last layer in image")
 )
 
 /*
@@ -46,11 +55,19 @@ func Squash(instream io.Reader, outstream io.Writer, imageIDOut io.Writer) error
 		return err
 	}
 
+	last := export.Last()
+	if last == nil {
+		return ErrorNoLast
+	}
+
 	// insert a new layer after our squash point
-	newEntry, err := export.InsertLayer(export.start.LayerConfig.ID)
+	newEntry, err := export.InsertLayer(last.LayerConfig.ID)
 	if err != nil {
 		return err
 	}
+
+	// copy this so we don't lose important metadata like ENV vars and ENTRYPOINT
+	newEntry.LayerConfig.Config = last.LayerConfig.Config
 
 	debugf("Inserted new layer %s after %s\n", newEntry.LayerConfig.ID[0:12], newEntry.LayerConfig.Parent[0:12])
 
