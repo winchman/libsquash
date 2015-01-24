@@ -1,135 +1,82 @@
 package libsquash
 
 import (
-	"archive/tar"
-	"encoding/json"
-	"errors"
 	"io"
 	"io/ioutil"
 	"os"
 	"strings"
 )
 
-var (
-	errorMultipleBranchesSameParent = errors.New("this image is a full repository export w/ multiple images in it. " +
-		"Please generate the export from a specific image ID or tag.",
-	)
-	errorNoFROM = errors.New("no layer matching FROM")
-)
+/*
+Squash squashes a docker image where instream is an io.Reader for the image
+tarball, outstream is an io.Writer to which the squashed image tarball will be written,
+and imageIDOut is an io.Writer to which the id of the squashed image will be written
 
-func Squash(instream io.Reader) (outstream io.Reader, err error) {
-	var tarReader = tar.NewReader(instream)
-	var export = newExport()
+The steps are as follows:
 
-	for {
-		header, err := tarReader.Next()
-		if err != nil {
-			if err == io.EOF {
-				break
-			}
-			return nil, err
-		}
+1. Go through stream, tee'ing it to a tempfile, get layer configs and layer->file lists
 
-		if header.Name == "." || header.Name == ".." || header.Name == "./" {
-			continue
-		}
+2. Using the metadata, go through the tar stream again (from the tempfile),
+build the squash layer, build the final image tar, and write it to our output stream
 
-		nameParts := strings.Split(header.Name, string(os.PathSeparator))
-		if len(nameParts) == 0 {
-			continue
-		}
-
-		if len(nameParts) == 1 {
-			if nameParts[0] == "repositories" {
-				bytes, err := ioutil.ReadAll(tarReader)
-				if err != nil {
-					return nil, err
-				}
-				if err = json.Unmarshal(bytes, &export.Repositories); err != nil {
-					return nil, err
-				}
-			}
-			continue
-		}
-
-		uuidPart := nameParts[0]
-		fileName := nameParts[1]
-		if export.Entries[uuidPart] == nil {
-			export.Entries[uuidPart] = &exportedImage{}
-		}
-
-		switch fileName {
-		case "":
-			export.Entries[uuidPart].DirHeader = header
-		case "json":
-			export.Entries[uuidPart].JsonHeader = header
-			bytes, err := ioutil.ReadAll(tarReader)
-			if err != nil {
-				return nil, err
-			}
-			if err = json.Unmarshal(bytes, &export.Entries[uuidPart].LayerConfig); err != nil {
-				return nil, err
-			}
-		case "layer.tar":
-			export.Entries[uuidPart].LayerTarHeader = header
-			_, err := export.Entries[uuidPart].LayerTarBuffer.ReadFrom(tarReader)
-			if err != nil {
-				return nil, err
-			}
-		case "VERSION":
-			export.Entries[uuidPart].VersionHeader = header
-		}
+3. (as a cleanup step, write the id of the final layer, which the daemon will
+use as the image id)
+*/
+func Squash(instream io.Reader, outstream io.Writer, imageIDOut io.Writer) error {
+	export := NewExport()
+	tempfile, err := ioutil.TempFile("", "libsquash")
+	if err != nil {
+		return err
 	}
 
-	// Export may have multiple branches with the same parent.
-	// We can't handle that currently so abort.
-	for _, v := range export.Repositories {
-		commits := map[string]string{}
-		for tag, commit := range *v {
-			commits[commit] = tag
-		}
-		if len(commits) > 1 {
-			return nil, errorMultipleBranchesSameParent
-		}
-	}
+	defer func() {
+		_ = tempfile.Close()
+		_ = os.RemoveAll(tempfile.Name())
+	}()
 
-	start := export.FirstSquash()
-	// Can't find a previously squashed layer, use first ADD
-	if start == nil {
-		start = export.FirstFrom()
-	}
-	// Can't find a FROM, default to root
-	if start == nil {
-		start = export.Root()
-	}
+	instreamTee := io.TeeReader(instream, tempfile)
 
-	if start == nil {
-		return nil, errorNoFROM
+	/*
+		1. Ingest Image Metadata: populate metadata from first stream
+	*/
+	export.IngestImageMetadata(instreamTee)
+
+	// rewind tempfile to the entire tar stream can be read back in
+	if _, err = tempfile.Seek(0, 0); err != nil {
+		return err
 	}
 
 	// insert a new layer after our squash point
-	newEntry, err := export.InsertLayer(start.LayerConfig.Id)
+	newEntry, err := export.InsertLayer(export.start.LayerConfig.ID)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
-	debugf("Inserted new layer %s after %s\n", newEntry.LayerConfig.Id[0:12], newEntry.LayerConfig.Parent[0:12])
+	debugf("Inserted new layer %s after %s\n", newEntry.LayerConfig.ID[0:12], newEntry.LayerConfig.Parent[0:12])
 
 	if Verbose {
-		printVerbose(export, newEntry.LayerConfig.Id)
+		printVerbose(export, newEntry.LayerConfig.ID)
 	}
 
-	// squash all later layers into our new layer
-	reader, err := export.SquashLayers(newEntry, start)
-	//reader, err := export.SquashLayers(newEntry, newEntry)
+	/*
+		2. squash all later layers into our new layer (from second stream)
+	*/
+	imageID, err := export.SquashLayers(newEntry, export.start, tempfile, outstream)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
-	return reader, nil
+	/*
+		3. write the imageID to the imageID output stream
+	*/
+	if _, err := imageIDOut.Write([]byte(imageID)); err != nil {
+		return err
+	}
+
+	return nil
 }
 
-func printVerbose(export *export, newEntryID string) {
+func printVerbose(export *Export, newEntryID string) {
 	e := export.Root()
 	for {
 		if e == nil {
@@ -140,11 +87,11 @@ func printVerbose(export *export, newEntryID string) {
 			cmd = cmd[:60]
 		}
 
-		if e.LayerConfig.Id == newEntryID {
-			debugf("  -> %s %s\n", e.LayerConfig.Id[0:12], cmd)
+		if e.LayerConfig.ID == newEntryID {
+			debugf("  -> %s %s\n", e.LayerConfig.ID[0:12], cmd)
 		} else {
-			debugf("  -  %s %s\n", e.LayerConfig.Id[0:12], cmd)
+			debugf("  -  %s %s\n", e.LayerConfig.ID[0:12], cmd)
 		}
-		e = export.ChildOf(e.LayerConfig.Id)
+		e = export.ChildOf(e.LayerConfig.ID)
 	}
 }

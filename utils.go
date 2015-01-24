@@ -1,30 +1,15 @@
 package libsquash
 
 import (
-	"bytes"
 	"crypto/rand"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"io"
 	"os"
-	//"os/exec"
 	"strconv"
+	"strings"
 	"time"
-
-	//"github.com/docker/docker/pkg/archive"
 )
-
-//func extractTar(src, dest string) ([]byte, error) {
-//cmd := exec.Command("tar", "--same-owner", "-xpf", src, "-C", dest, "--exclude=.wh.*")
-////srcFile, err := os.Open(src)
-////if err != nil {
-////return nil, err
-////}
-////return nil, archive.Untar(srcFile, dest, &archive.TarOptions{NoLchown: false})
-////cmd := exec.Command("tar", "-xpf", src, "-C", dest)
-//return cmd.CombinedOutput()
-//}
 
 func humanDuration(d time.Duration) string {
 	if seconds := int(d.Seconds()); seconds < 1 {
@@ -71,26 +56,21 @@ func newID() (string, error) {
 	}
 }
 
-func readJsonFile(path string, dest interface{}) error {
-	f, err := os.Open(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil
+func isWhiteout(filepath string) bool {
+	nameParts := strings.Split(filepath, string(os.PathSeparator))
+	fileName := nameParts[len(nameParts)-1]
+	return strings.HasPrefix(fileName, ".wh.")
+}
+
+func nameWithoutWhiteoutPrefix(filepath string) string {
+	return strings.Replace(filepath, ".wh.", "", -1)
+}
+
+func matchesWhiteout(filename string, whiteouts []whiteoutFile) (uuidContainingWhiteout string, matches bool) {
+	for _, whiteout := range whiteouts {
+		if strings.HasPrefix(filename, whiteout.prefix) {
+			return whiteout.uuid, true
 		}
-		return err
 	}
-	buf := bytes.NewBuffer([]byte{})
-
-	_, err = buf.ReadFrom(f)
-	if err != nil {
-		f.Close()
-		return err
-	}
-
-	err = json.Unmarshal(buf.Bytes(), dest)
-	if err != nil {
-		f.Close()
-		return err
-	}
-	return nil
+	return "", false
 }
