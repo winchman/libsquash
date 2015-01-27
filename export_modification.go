@@ -27,7 +27,9 @@ func (e *Export) InsertLayer(parent string) (*Layer, error) {
 
 	// rewrite child json
 	child := e.ChildOf(parent)
-	child.LayerConfig.Parent = id
+	if child != nil {
+		child.LayerConfig.Parent = id
+	}
 
 	e.Layers[id] = entry
 
@@ -47,7 +49,8 @@ func (e *Export) ReplaceLayer(orig *Layer) error {
 	oldID := orig.LayerConfig.ID
 	child := e.ChildOf(oldID)
 
-	newLayer := &Layer{LayerConfig: orig.LayerConfig}
+	newLayer := orig.Clone()
+
 	newLayer.LayerConfig.Created = time.Now().UTC()
 	newLayer.LayerConfig.ID = newID
 
@@ -65,17 +68,4 @@ func (e *Export) ReplaceLayer(orig *Layer) error {
 	delete(e.Layers, oldID)
 
 	return nil
-}
-
-// RemoveLayer removes layer "l" and wires its parent to its child
-func (e *Export) RemoveLayer(l *Layer) {
-	layerID := l.LayerConfig.ID
-
-	debugf("  -  Removing %s. Squashed. (%s)\n", layerID[:12], l.Cmd())
-
-	child := e.ChildOf(layerID)
-	if child != nil {
-		e.Layers[child.LayerConfig.ID].LayerConfig.Parent = l.LayerConfig.Parent
-	}
-	delete(e.Layers, layerID)
 }

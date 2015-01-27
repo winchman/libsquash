@@ -4,7 +4,6 @@ import (
 	"io"
 	"io/ioutil"
 	"os"
-	"strings"
 
 	"github.com/winchman/libsquash/tarball"
 )
@@ -70,7 +69,7 @@ func (e *Export) SquashLayers(into, from *Layer, tarstream io.Reader, outstream 
 
 	// rewrite the subsequent layers
 	debug("  -  Rewriting child history")
-	if err := e.RewriteChildren(into); err != nil {
+	if err := e.RewriteChildren(from, into.LayerConfig.ID); err != nil {
 		return "", err
 	}
 
@@ -92,21 +91,16 @@ inherited by the squash layer. The logic is as follows:
 	* keep it, but give it a new ID and timestamp
 	* the history of that layer and its changes (e.g. new env vars, new workdir, etc.) will be preserved
 */
-func (e *Export) RewriteChildren(from *Layer) error {
-	var entry = from
-	squashID := entry.LayerConfig.ID
+func (e *Export) RewriteChildren(from *Layer, squashID string) error {
+	entry := from
 	for {
 		if entry == nil {
 			break
 		}
 		child := e.ChildOf(entry.LayerConfig.ID)
-		if entry.LayerConfig.ID != squashID && !strings.Contains(entry.Cmd(), "#(squash)") {
-			if strings.Contains(entry.Cmd(), "#(nop)") && !strings.Contains(entry.Cmd(), "ADD") {
-				if err := e.ReplaceLayer(entry); err != nil {
-					return err
-				}
-			} else {
-				e.RemoveLayer(entry)
+		if entry.LayerConfig.ID != squashID {
+			if err := e.ReplaceLayer(entry); err != nil {
+				return err
 			}
 		}
 		entry = child

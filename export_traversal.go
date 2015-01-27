@@ -11,7 +11,6 @@ func (e *Export) firstLayer(pattern string) *Layer {
 		if root == nil {
 			break
 		}
-
 		cmd := strings.Join(root.LayerConfig.ContainerConfig().Cmd, " ")
 		if strings.Contains(cmd, pattern) {
 			break
@@ -29,6 +28,22 @@ func (e *Export) FirstSquash() *Layer {
 // Root returns the top layer in the export
 func (e *Export) Root() *Layer {
 	return e.ChildOf("")
+}
+
+// Last returns the layer found last in the list
+func (e *Export) Last() *Layer {
+	current := e.Root()
+	for {
+		if current == nil {
+			break
+		}
+		child := e.ChildOf(current.LayerConfig.ID)
+		if child == nil {
+			break
+		}
+		current = child
+	}
+	return current
 }
 
 // ChildOf returns the child layer or nil of the parent

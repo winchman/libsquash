@@ -116,7 +116,6 @@ func (e *Export) IngestImageMetadata(tarstream io.Reader) error {
 
 // populateFileData populates the layerToFiles as described above
 func (e *Export) populateFileData() error {
-
 	e.start = e.FirstSquash()
 
 	// Can't find a previously squashed layer, default to root
