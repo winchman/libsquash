@@ -31,7 +31,7 @@ build the squash layer, build the final image tar, and write it to our output st
 3. (as a cleanup step, write the id of the final layer, which the daemon will
 use as the image id)
 */
-func Squash(instream io.Reader, outstream io.Writer, imageIDOut io.Writer) error {
+func Squash(instream io.Reader, outstream io.Writer, imageIDOut io.Writer, options SquashOptions) error {
 	export := NewExport()
 	tempfile, err := ioutil.TempFile("", "libsquash")
 	if err != nil {
@@ -48,7 +48,17 @@ func Squash(instream io.Reader, outstream io.Writer, imageIDOut io.Writer) error
 	/*
 		1. Ingest Image Metadata: populate metadata from first stream
 	*/
-	export.IngestImageMetadata(instreamTee)
+	if err := export.IngestImageMetadata(instreamTee); err != nil {
+		return err
+	}
+
+	if err := export.AssignStartLayer(options.From); err != nil {
+		return err
+	}
+
+	if err := export.PopulateFileData(); err != nil {
+		return err
+	}
 
 	// rewind tempfile to the entire tar stream can be read back in
 	if _, err = tempfile.Seek(0, 0); err != nil {
@@ -78,7 +88,7 @@ func Squash(instream io.Reader, outstream io.Writer, imageIDOut io.Writer) error
 	/*
 		2. squash all later layers into our new layer (from second stream)
 	*/
-	imageID, err := export.SquashLayers(newEntry, export.start, tempfile, outstream)
+	imageID, err := export.SquashLayers(newEntry, export.start, tempfile, outstream, options.Tags)
 	if err != nil {
 		return err
 	}

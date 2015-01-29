@@ -24,7 +24,7 @@ LayerConfig data), write the four rquired files
 		a. if this is the #(squash) layer, it should contain all of the image's data
 		b. if it is any other layer, it will contain only 2x 512 byte blocks of \x00 (this is the way to represent an empty tarball)
 */
-func (e *Export) RebuildImage(squashLayer *Layer, outstream io.Writer, squashLayerFile *os.File) (imageID string, err error) {
+func (e *Export) RebuildImage(squashLayer *Layer, outstream io.Writer, squashLayerFile *os.File, tags TagList) (imageID string, err error) {
 	var (
 		latestDirHeader, latestVersionHeader *tar.Header
 		latestJSONHeader, latestTarHeader    *tar.Header
@@ -102,6 +102,24 @@ func (e *Export) RebuildImage(squashLayer *Layer, outstream io.Writer, squashLay
 		}
 		current = child
 	}
+
+	// write "repositories" file if tags have been provided
+	if len(tags) != 0 {
+		header := &tar.Header{
+			Name: "repositories",
+			Mode: 0644,
+		}
+		repositories := tags.ProduceRepositories(retID)
+		repoBytes, err := json.Marshal(repositories)
+		if err != nil {
+			return "", err
+		}
+		header.Size = int64(len(repoBytes))
+		if err := tw.Add(&tarball.TarFile{Header: header, Stream: bytes.NewBuffer(repoBytes)}); err != nil {
+			return "", err
+		}
+	}
+
 	// close tar writer before returning
 	if err := tw.Close(); err != nil {
 		return "", err

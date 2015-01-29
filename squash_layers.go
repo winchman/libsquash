@@ -13,7 +13,7 @@ SquashLayers produces the #(squash) layer from the contents in the tarball,
 rewrites the subsequent layers, using e.RewriteChildren, and then rewrites
 the final image tar by calling e.RebuildImage
 */
-func (e *Export) SquashLayers(into, from *Layer, tarstream io.Reader, outstream io.Writer) (imageID string, err error) {
+func (e *Export) SquashLayers(into, from *Layer, tarstream io.Reader, outstream io.Writer, tags TagList) (imageID string, err error) {
 	tempfile, err := ioutil.TempFile("", "libsquash")
 	if err != nil {
 		return "", err
@@ -74,7 +74,7 @@ func (e *Export) SquashLayers(into, from *Layer, tarstream io.Reader, outstream 
 	}
 
 	// rebuild the image tarball for the squashed layer
-	return e.RebuildImage(into, outstream, tempfile)
+	return e.RebuildImage(into, outstream, tempfile, tags)
 }
 
 /*

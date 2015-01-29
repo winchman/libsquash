@@ -17,6 +17,10 @@ var (
 
 	// ErrorNoFROM is returned when o root layer can be found
 	ErrorNoFROM = errors.New("no root layer found")
+
+	// ErrorInvalidFROM is returned when the From layer provided in
+	// SquashOptions cannot be found in the image tarball
+	ErrorInvalidFROM = errors.New("invalid/nonexistent From layer provided in SquashOptions")
 )
 
 /*
@@ -110,12 +114,28 @@ func (e *Export) IngestImageMetadata(tarstream io.Reader) error {
 	}); err != nil {
 		return err
 	}
-
-	return e.populateFileData()
+	return nil
 }
 
-// populateFileData populates the layerToFiles as described above
-func (e *Export) populateFileData() error {
+// AssignStartLayer determines the layer at which to start the squashing
+// process. If a From layer is provided in SquashOptions, that layer is
+// preferred.  Next in line is the last squash layer, and if none exists, the
+// root is used.  If the From layer in SquashOptions is invalid or the root
+// layer cannot be found, AssignStartLayer will return an error
+func (e *Export) AssignStartLayer(from string) error {
+	// if a custom From layer is provided
+	if from != "" {
+		layer, err := e.GetByID(from)
+		if err != nil {
+			return err
+		} else if layer == nil {
+			return ErrorInvalidFROM
+		} else {
+			e.start = layer
+			return nil
+		}
+	}
+
 	e.start = e.FirstSquash()
 
 	// Can't find a previously squashed layer, default to root
@@ -126,7 +146,12 @@ func (e *Export) populateFileData() error {
 	if e.start == nil {
 		return ErrorNoFROM
 	}
+	return nil
+}
 
+// PopulateFileData populates the layerToFiles as described in the comments for
+// IngestImageMetadata
+func (e *Export) PopulateFileData() error {
 	index := 0
 	current := e.start
 	orderMap := map[string]int{}
@@ -161,6 +186,5 @@ func (e *Export) populateFileData() error {
 			}
 		}
 	}
-
 	return nil
 }
