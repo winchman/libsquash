@@ -54,9 +54,9 @@ to pull from it. That requires the layerToFiles structure.
 func (e *Export) IngestImageMetadata(tarstream io.Reader) error {
 	if err := tarball.Walk(tarstream, func(t *tarball.TarFile) error {
 		switch ParseType(t) {
-		case Ignore:
+		case IgnoreType:
 			// ignore
-		case Repositories:
+		case RepositoriesType:
 			if err := json.NewDecoder(t.Stream).Decode(&e.Repositories); err != nil {
 				return err
 			}
@@ -70,7 +70,7 @@ func (e *Export) IngestImageMetadata(tarstream io.Reader) error {
 					return ErrorMultipleBranchesSameParent
 				}
 			}
-		case JSON:
+		case JSONType:
 			uuid := t.NameParts()[0]
 			if e.Layers[uuid] == nil {
 				e.Layers[uuid] = &Layer{}
@@ -79,7 +79,7 @@ func (e *Export) IngestImageMetadata(tarstream io.Reader) error {
 			if err := json.NewDecoder(t.Stream).Decode(&e.Layers[uuid].LayerConfig); err != nil {
 				return err
 			}
-		case LayerTar:
+		case LayerTarType:
 			uuid := t.NameParts()[0]
 			if e.Layers[uuid] == nil {
 				e.Layers[uuid] = &Layer{}

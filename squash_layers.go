@@ -30,10 +30,10 @@ func (e *Export) SquashLayers(into, from *Layer, tarstream io.Reader, outstream 
 	if err = tarball.Walk(tarstream, func(t *tarball.TarFile) error {
 		nameParts := t.NameParts()
 		switch ParseType(t) {
-		case Directory:
+		case DirectoryType:
 			uuidPart := nameParts[0]
 			e.Layers[uuidPart].DirHeader = t.Header
-		case LayerTar:
+		case LayerTarType:
 			uuidPart := nameParts[0]
 			e.Layers[uuidPart].LayerTarHeader = t.Header
 			if err := tarball.Walk(t.Stream, func(tf *tarball.TarFile) error {
@@ -47,7 +47,7 @@ func (e *Export) SquashLayers(into, from *Layer, tarstream io.Reader, outstream 
 			}); err != nil {
 				return err
 			}
-		case Version:
+		case VersionType:
 			uuidPart := nameParts[0]
 			e.Layers[uuidPart].VersionHeader = t.Header
 		}

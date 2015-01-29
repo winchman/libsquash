@@ -11,26 +11,26 @@ import (
 type LayerFileType uint8
 
 const (
-	// Ignore is for ".", "..", and "./" (identified by LayerFileIgnoreRegex)
-	Ignore LayerFileType = iota
+	// IgnoreType is for ".", "..", and "./" (identified by LayerFileIgnoreRegex)
+	IgnoreType LayerFileType = iota
 
-	// Repositories is for "repositories"
-	Repositories
+	// RepositoriesType is for "repositories"
+	RepositoriesType
 
-	// Directory is for "<uuid>/"
-	Directory
+	// DirectoryType is for "<uuid>/"
+	DirectoryType
 
-	// JSON is for "<uuid>/json"
-	JSON
+	// JSONType is for "<uuid>/json"
+	JSONType
 
-	// LayerTar is for "<uuid>/layer.tar"
-	LayerTar
+	// LayerTarType is for "<uuid>/layer.tar"
+	LayerTarType
 
-	// Version is for "<uuid>/VERSION"
-	Version
+	// VersionType is for "<uuid>/VERSION"
+	VersionType
 
-	// Unknown is for files that cannot be otherwise identified
-	Unknown
+	// UnknownType is for files that cannot be otherwise identified
+	UnknownType
 )
 
 // LayerFileIgnoreRegex is the regex for identifying files that should be of
@@ -40,28 +40,28 @@ var LayerFileIgnoreRegex = regexp.MustCompile(`^\.$|^\.\.$|^\.\/$`)
 // ParseType returns the LayerFileType of the given tar file
 func ParseType(t *tarball.TarFile) LayerFileType {
 	if LayerFileIgnoreRegex.MatchString(t.Name()) {
-		return Ignore
+		return IgnoreType
 	}
 	nameParts := t.NameParts()
 	switch len(nameParts) {
 	case 0:
-		return Ignore
+		return IgnoreType
 	case 1:
 		if nameParts[0] == "repositories" {
-			return Repositories
+			return RepositoriesType
 		}
-		return Unknown
+		return UnknownType
 	case 2:
 		switch nameParts[1] {
 		case "":
-			return Directory
+			return DirectoryType
 		case "json":
-			return JSON
+			return JSONType
 		case "layer.tar":
-			return LayerTar
+			return LayerTarType
 		case "VERSION":
-			return Version
+			return VersionType
 		}
 	}
-	return Unknown
+	return UnknownType
 }
